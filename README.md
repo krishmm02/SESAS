@@ -36,13 +36,44 @@ OpenStreetMap, and the U.S. Large-Scale Solar Photovoltaic Database (USPVDB).
    python scripts/check_setup.py
    ```
 
+## Data pipeline
+
+```
+python scripts/run_pipeline.py            # every step, in order
+python scripts/run_pipeline.py osm grid   # selected steps
+python scripts/run_pipeline.py --list
+```
+
+Downloads are cached in `data/raw/` and intermediate rasters in `data/processed/`, so
+re-runs are fast. Each step writes to PostGIS (CRS EPSG:26985, meters) and later steps read
+from there. Only `acs` needs an API key (`CENSUS_API_KEY`).
+
+| Step | Source | Output table |
+|---|---|---|
+| boundaries | Census cartographic boundaries 2022 (shoreline-clipped) | `raw.state_boundary`, `raw.tracts` |
+| acs | ACS 2018-2022 5-year (housing, income, poverty, race) | `raw.acs` |
+| lead | NREL LEAD 2022: energy burden, low-income share | `raw.lead` |
+| deepsolar | DeepSolar installs, moved from 2010 to 2020 tracts by land-area share | `raw.deepsolar` |
+| irradiance | NASA POWER annual/monthly GHI climatology (1 degree grid) | `raw.power_ghi` |
+| grid | 1 km cells over Maryland land | `features.grid` |
+| terrain | Copernicus DEM GLO-90 (elevation, slope, aspect), ESA WorldCover 2021 | `features.grid_terrain` |
+| osm | OSM transmission lines and substations (Overpass) | `raw.osm_power_lines`, `raw.osm_substations` |
+| uspvdb | USPVDB large-scale PV facility polygons | `raw.uspvdb` |
+| tract_features | joins tracts + ACS + LEAD + DeepSolar + GHI | `features.tract_features` |
+| grid_features | joins grid + terrain + GHI + grid distances + PV labels | `features.grid_features` |
+
+The model-ready tables are `features.tract_features` (rooftop model and equity index) and
+`features.grid_features` (terrain model). The grid label is `has_pv` (USPVDB covers at least
+1% of the cell); `pv_frac` holds the raw coverage. WorldCover 2021 can show existing arrays as
+built or bare land, so watch for label leakage through the `lc_*` features.
+
 ## Layout
 
 ```
 data/raw/          source downloads (gitignored)
 data/processed/    cleaned outputs (gitignored)
 notebooks/         exploration
-pipeline/          data ingestion scripts; db.py returns a PostGIS engine
+pipeline/          data ingestion steps (one module per source); db.py returns a PostGIS engine
 services/          FastAPI microservices
 models/            trained model artifacts (gitignored)
 db/init/           SQL run on first database start (PostGIS + schemas raw, features, scores)
@@ -52,10 +83,10 @@ scripts/           utilities, e.g. check_setup.py
 ## Roadmap
 
 - [x] 1. Project scaffold
-- [ ] 2. Census tracts + ACS
-- [ ] 3. LEAD + DeepSolar
-- [ ] 4. NASA POWER irradiance
-- [ ] 5. Terrain features (DEM, WorldCover, OSM grid distance)
-- [ ] 6. USPVDB labels + terrain model
+- [ ] 2. Census tracts + ACS (tracts done; ACS step written, needs a Census API key to run)
+- [x] 3. LEAD + DeepSolar
+- [x] 4. NASA POWER irradiance
+- [x] 5. Terrain features (DEM, WorldCover, OSM grid distance)
+- [ ] 6. USPVDB labels + terrain model (labels done)
 - [ ] 7. Rooftop model + equity gap index
 - [ ] 8. FastAPI services + map

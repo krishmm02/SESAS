@@ -12,6 +12,7 @@ dependencies:
   # data + ML
   - pandas
   - numpy
+  - scipy
   - requests
   - scikit-learn
   - xgboost
