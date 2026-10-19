@@ -1,0 +1,23 @@
+# secrets
+.env
+
+# data and model artifacts (keep folder placeholders)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
+
+# large geospatial / archive files
+*.tif
+*.nc
+*.zip
+
+# python / jupyter
+__pycache__/
+.ipynb_checkpoints/
+.venv/
+
+# OS
+.DS_Store

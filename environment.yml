@@ -1,0 +1,29 @@
+name: solar
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  # geospatial (GDAL/rasterio from conda-forge, never pip)
+  - gdal
+  - rasterio
+  - geopandas
+  - pyogrio
+  # data + ML
+  - pandas
+  - numpy
+  - requests
+  - scikit-learn
+  - xgboost
+  - shap
+  - matplotlib
+  - seaborn
+  - jupyterlab
+  # database
+  - sqlalchemy
+  - geoalchemy2
+  - psycopg2
+  # services
+  - fastapi
+  - uvicorn
+  - python-dotenv
