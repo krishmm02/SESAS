@@ -1,4 +1,4 @@
-"""Step 5b: terrain and land cover features per 1 km grid cell.
+"""Step 5b: terrain and land cover features per 1 km grid cell, and terrain per tract.
 
 - Copernicus DEM GLO-90 tiles -> elevation, slope, south-facing share
 - ESA WorldCover 2021 (read remotely from its ~40 m overview) -> land cover shares
@@ -6,7 +6,8 @@
 Both are resampled to FINE_RES on the grid's origin, then summarized per cell.
 Intermediate 100 m rasters are cached in data/processed/.
 
-Table: features.grid_terrain
+Tables: features.grid_terrain   one row per 1 km cell
+        features.tract_terrain  one row per census tract (TerrainService data)
 """
 
 import warnings
@@ -15,6 +16,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 import requests
+from rasterio.features import rasterize
 from rasterio.merge import merge
 from rasterio.transform import from_origin
 from rasterio.warp import Resampling, reproject
@@ -147,5 +149,52 @@ def build(boundary, grid) -> pd.DataFrame:
     return out.round(4)
 
 
+def build_tracts(boundary, tracts) -> pd.DataFrame:
+    """Zonal statistics of the 100 m DEM over each tract polygon.
+
+    A pixel belongs to the tract containing its center, so tracts smaller than a
+    pixel (about 1 ha) get no pixels and NaN statistics.
+    """
+    dem = dem_100m(boundary)
+    slope, aspect = slope_aspect(dem)
+    transform, shape = _target(boundary)
+    zones = rasterize(zip(tracts.geometry, range(1, len(tracts) + 1)), out_shape=shape,
+                      transform=transform, fill=0, dtype="int32")
+
+    keep = (zones > 0) & ~np.isnan(slope)
+    sloped = slope[keep] >= 1  # aspect is meaningless on flat ground
+    px = pd.DataFrame({
+        "zone": zones[keep],
+        "elev": dem[keep],
+        "slope": slope[keep],
+        "flat": slope[keep] < FLAT_SLOPE_DEG,
+        "south": sloped & (aspect[keep] >= 135) & (aspect[keep] <= 225),
+        # unit vectors on sloped pixels, so the mean gives a circular mean aspect
+        "ax": np.where(sloped, np.sin(np.radians(aspect[keep])), np.nan),
+        "ay": np.where(sloped, np.cos(np.radians(aspect[keep])), np.nan),
+    })
+    g = px.groupby("zone")
+    stats = pd.DataFrame({
+        "n_pixels": g.size(),
+        "elev_mean_m": g["elev"].mean(),
+        "elev_max_m": g["elev"].max(),
+        "elev_range_m": g["elev"].max() - g["elev"].min(),
+        "slope_mean_deg": g["slope"].mean(),
+        "slope_p90_deg": g["slope"].quantile(0.9),
+        "flat_frac": g["flat"].mean(),
+        "south_facing_frac": g["south"].mean(),
+        "aspect_mean_deg": (np.degrees(np.arctan2(g["ax"].mean(), g["ay"].mean())) + 360) % 360,
+    })
+
+    out = pd.DataFrame({"geoid": tracts["geoid"].to_numpy()}, index=range(1, len(tracts) + 1))
+    out = out.join(stats)
+    out["n_pixels"] = out["n_pixels"].fillna(0).astype(int)
+    return out.round(4).reset_index(drop=True)
+
+
 def run() -> None:
     save(build(load("state_boundary"), load("grid", schema="features")), "grid_terrain", schema="features")
+
+
+def run_tracts() -> None:
+    save(build_tracts(load("state_boundary"), load("tracts")), "tract_terrain", schema="features")

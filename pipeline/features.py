@@ -13,7 +13,7 @@ import geopandas as gpd
 import numpy as np
 
 from pipeline.config import GRID_SIZE
-from pipeline.irradiance import sample_ghi
+from pipeline.irradiance import sample
 from pipeline.utils import load, save
 
 PV_MIN_FRAC = 0.01  # 1 ha of a 1 km2 cell
@@ -25,8 +25,9 @@ def build_tract_features() -> gpd.GeoDataFrame:
         tracts.merge(load("acs"), on="geoid", how="left")
         .merge(load("lead"), on="geoid", how="left")
         .merge(load("deepsolar"), on="geoid", how="left")
+        .merge(load("tract_irradiance", schema="features"), on="geoid", how="left")
+        .merge(load("tract_terrain", schema="features"), on="geoid", how="left")
     )
-    df["ghi_kwh_m2_day"] = sample_ghi(df.representative_point(), load("power_ghi"))
     land_km2 = df["aland_m2"].replace(0, np.nan) / 1e6
     df["pop_density_km2"] = (df["population"] / land_km2).round(1)
     return df
@@ -37,7 +38,7 @@ def build_grid_features() -> gpd.GeoDataFrame:
     df = grid.merge(load("grid_terrain", schema="features"), on="cell_id", how="left")
     centroids = df.centroid
 
-    df["ghi_kwh_m2_day"] = sample_ghi(centroids, load("power_ghi"))
+    df["ghi_kwh_m2_day"] = sample(centroids, load("power_climatology"))
 
     pts = gpd.GeoDataFrame(geometry=centroids, crs=df.crs)
     for name, table in (("line", "osm_power_lines"), ("substation", "osm_substations")):

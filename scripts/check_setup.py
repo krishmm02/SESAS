@@ -43,9 +43,10 @@ try:
 
     from pipeline.db import get_engine
 
-    with get_engine().connect() as conn:
+    engine = get_engine()
+    with engine.connect() as conn:
         version = conn.execute(text("SELECT postgis_version()")).scalar()
-    report("PostGIS connection", True, f"postgis_version() = {version}")
+    report("PostGIS connection", True, f"{engine.url.host}: postgis_version() = {version}")
 except Exception as e:
     report("PostGIS connection", False, str(e).splitlines()[0])
 
