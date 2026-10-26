@@ -11,9 +11,9 @@ GEOID = r"^24\d{9}$"   # 11-digit Maryland tract GEOID
 COUNTY = r"^24\d{3}$"  # 5-digit Maryland county FIPS
 
 
-def tract_rows(table: str, county: str | None = None) -> list[dict]:
-    """All rows of features.<table>, optionally only one county's tracts."""
-    sql = f'SELECT * FROM features."{table}"'
+def tract_rows(table: str, county: str | None = None, schema: str = "features") -> list[dict]:
+    """All rows of <schema>.<table>, optionally only one county's tracts."""
+    sql = f'SELECT * FROM {schema}."{table}"'
     params = {}
     if county:
         sql += " WHERE geoid LIKE :prefix"
@@ -22,14 +22,20 @@ def tract_rows(table: str, county: str | None = None) -> list[dict]:
         return [dict(r) for r in conn.execute(text(sql + " ORDER BY geoid"), params).mappings()]
 
 
-def tract_row(table: str, geoid: str) -> dict:
-    """One tract's row of features.<table>, or 404."""
+def tract_row(table: str, geoid: str, schema: str = "features") -> dict:
+    """One tract's row of <schema>.<table>, or 404."""
     with engine.connect() as conn:
-        row = conn.execute(text(f'SELECT * FROM features."{table}" WHERE geoid = :g'),
+        row = conn.execute(text(f'SELECT * FROM {schema}."{table}" WHERE geoid = :g'),
                            {"g": geoid}).mappings().first()
     if row is None:
         raise HTTPException(404, f"tract {geoid} not found")
     return dict(row)
+
+
+def query(sql: str, params: dict | None = None) -> list[dict]:
+    """Run read-only SQL written in this repo. Never interpolate request input into it."""
+    with engine.connect() as conn:
+        return [dict(r) for r in conn.execute(text(sql), params or {}).mappings()]
 
 
 def ping() -> dict:
