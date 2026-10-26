@@ -1,7 +1,10 @@
 """VisualizationService: map-ready GeoJSON for the dashboard.
 
     uvicorn services.visualization:app --port 8006
-`
+
+The dashboard is served from this same service at /app/, so the browser fetches
+/geojson/equity same-origin and no CORS configuration is needed anywhere.
+
 Unlike the other services, this one does not read scores from the database. It calls
 EquityGapService over REST and joins the response to tract geometry from PostGIS. That
 is deliberate: it is the composition step the architecture claims, and it means the map
@@ -15,7 +18,9 @@ import os
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
 
+from pipeline.config import ROOT
 from services.common import COUNTY, ping, query
 
 app = FastAPI(title="VisualizationService")
@@ -80,3 +85,7 @@ def equity_geojson(county: str | None = Query(None, pattern=COUNTY, description=
         "features": features,
         "metadata": {"county": county, "count": len(features), "source": f"{EQUITY_URL}/equity"},
     }
+
+
+# Mounted last so it cannot shadow the API routes above.
+app.mount("/app", StaticFiles(directory=ROOT / "web", html=True), name="dashboard")

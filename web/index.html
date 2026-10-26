@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SESAS — Solar Equity Gap, Maryland</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --ink:#15202b; --ink-mid:#4a5968; --ink-soft:#7a8795;
+    --line:#dde3ea; --panel:#ffffff; --ground:#f4f6f9;
+    --hi:#b2182b; --mid:#ef8a62; --neutral:#f7f7f7; --lo:#67a9cf; --lolo:#2166ac;
+    --accent:#c1440e;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font-family:var(--font);color:var(--ink);background:var(--ground);display:flex;flex-direction:column}
+
+  header{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 18px;
+         display:flex;align-items:center;gap:22px;flex-wrap:wrap;z-index:1000}
+  h1{font-size:15px;font-weight:650;margin:0;letter-spacing:-.01em;white-space:nowrap}
+  h1 span{color:var(--ink-soft);font-weight:400}
+  select{font-family:var(--font);font-size:13px;padding:5px 9px;border:1px solid var(--line);
+         border-radius:5px;background:#fff;color:var(--ink);min-width:190px}
+  label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);
+        margin-right:7px;font-weight:600}
+  #tiers{display:flex;gap:7px;margin-left:auto;flex-wrap:wrap}
+  .chip{font-size:11px;font-family:var(--mono);padding:4px 9px;border-radius:11px;
+        border:1px solid var(--line);background:#fff;white-space:nowrap}
+  .chip b{font-weight:650}
+  .chip.HIGH{background:#fdecea;border-color:#f3c0b9;color:var(--hi)}
+  .chip.MEDIUM{background:#fef4ec;border-color:#f6d9c2;color:#9a4f12}
+  .chip.LOW{background:#eef4fa;border-color:#cfe0ef;color:#2166ac}
+
+  main{flex:1;display:flex;min-height:0}
+  #map{flex:1;min-width:0;background:var(--ground)}
+  aside{width:312px;flex:none;background:var(--panel);border-left:1px solid var(--line);
+        overflow-y:auto;padding:16px 18px}
+
+  .empty{color:var(--ink-soft);font-size:13px;line-height:1.55;margin-top:6px}
+  .geoid{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin:0 0 3px}
+  .tier{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.05em;
+        padding:3px 9px;border-radius:4px;margin-bottom:14px}
+  .tier.HIGH{background:#fdecea;color:var(--hi)}
+  .tier.MEDIUM{background:#fef4ec;color:#9a4f12}
+  .tier.LOW{background:#eef4fa;color:#2166ac}
+  .tier.NONE{background:#f0f2f5;color:var(--ink-soft)}
+
+  .pair{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+        padding:9px 0;border-bottom:1px solid var(--line)}
+  .pair:last-child{border-bottom:0}
+  .pair dt{font-size:12px;color:var(--ink-mid)}
+  .pair dd{margin:0;font-family:var(--mono);font-size:13px;font-weight:600;
+           font-variant-numeric:tabular-nums}
+  dl{margin:0}
+  .big{font-size:26px;font-weight:650;font-family:var(--mono);line-height:1.1;
+       font-variant-numeric:tabular-nums}
+  .big.pos{color:var(--hi)} .big.neg{color:var(--lolo)}
+  .sub{font-size:11px;color:var(--ink-soft);margin-top:3px;line-height:1.45}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-soft);
+     margin:20px 0 7px;font-weight:650}
+  .note{font-size:11px;color:var(--ink-soft);line-height:1.5;margin-top:14px;
+        padding-top:12px;border-top:1px solid var(--line)}
+
+  .legend{background:#fff;padding:9px 11px;border-radius:6px;border:1px solid var(--line);
+          font-size:11px;line-height:1.7;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  .legend i{width:15px;height:11px;float:left;margin:3px 7px 0 0;border-radius:2px}
+  .legend .t{font-weight:650;margin-bottom:5px;font-size:10px;text-transform:uppercase;
+             letter-spacing:.05em;color:var(--ink-soft)}
+  .leaflet-container{font-family:var(--font)}
+  #status{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:900;
+          background:#fff;border:1px solid var(--line);border-radius:7px;padding:14px 20px;
+          font-size:13px;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+  #status.err{border-color:#f3c0b9;background:#fdecea;color:var(--hi);max-width:420px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Solar Equity Gap <span>· Maryland</span></h1>
+  <div><label for="county">County</label><select id="county"></select></div>
+  <div id="tiers"></div>
+</header>
+
+<main>
+  <div id="map"><div id="status">Loading tracts…</div></div>
+  <aside>
+    <div id="panel">
+      <h2>Tract detail</h2>
+      <p class="empty">Click any tract to see its expected versus actual adoption and the
+         structural factor driving its gap.</p>
+    </div>
+  </aside>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const COUNTIES = {
+  "":"All Maryland","24001":"Allegany","24003":"Anne Arundel","24005":"Baltimore County",
+  "24009":"Calvert","24011":"Caroline","24013":"Carroll","24015":"Cecil","24017":"Charles",
+  "24019":"Dorchester","24021":"Frederick","24023":"Garrett","24025":"Harford","24027":"Howard",
+  "24029":"Kent","24031":"Montgomery","24033":"Prince George's","24035":"Queen Anne's",
+  "24037":"St. Mary's","24039":"Somerset","24041":"Talbot","24043":"Washington",
+  "24045":"Wicomico","24047":"Worcester","24510":"Baltimore City"
+};
+
+const LABELS = {
+  pct_minority:"Minority share", median_household_income:"Median income",
+  median_home_value:"Median home value", single_family_detached_rate:"Detached homes",
+  owner_rate:"Owner-occupancy", pop_density_km2:"Population density",
+  low_income_share:"Low-income share", energy_burden:"Energy burden",
+  poverty_rate:"Poverty rate", renter_share:"Renter share", median_year_built:"Housing vintage"
+};
+
+// Colour by priority tier, not by raw gap. Tiers come from the statewide gap percentile, so
+// a tract can sit in the HIGH tier on a gap of +2.25 - which on a raw-gap scale spanning
+// -19 to +10 renders as the palest possible fill. Keying the map to the tier keeps the
+// fill, the legend and the detail badge all saying the same thing.
+const TIER_COLORS = {HIGH:"#b2182b", MEDIUM:"#ef8a62", LOW:"#4393c3"};
+const colorFor = t => TIER_COLORS[t] || "#d9dee4";
+
+const map = L.map("map", {zoomControl:true}).setView([39.03, -76.8], 8);
+// Plain OSM tiles: CARTO's basemaps started demanding an API key, and a course project
+// should not carry a credential just to draw a background.
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution:'&copy; OpenStreetMap contributors', maxZoom:19, opacity:0.55
+}).addTo(map);
+
+const legend = L.control({position:"bottomright"});
+legend.onAdd = () => {
+  const d = L.DomUtil.create("div","legend");
+  const rows = [
+    ["#b2182b","High — top quartile gap"],
+    ["#ef8a62","Medium"],
+    ["#4393c3","Low — at or above expectation"],
+    ["#d9dee4","Not scored"]
+  ];
+  d.innerHTML = '<div class="t">Intervention priority</div>' +
+    rows.map(([c,t]) => `<i style="background:${c}"></i>${t}<br>`).join("");
+  return d;
+};
+legend.addTo(map);
+
+const sel = document.getElementById("county");
+Object.entries(COUNTIES).forEach(([v,n]) => sel.add(new Option(n, v)));
+sel.value = "24510";
+
+let layer = null, selected = null;
+
+const fmt = (v, d=2) => v == null ? "—" : Number(v).toFixed(d);
+
+function setStatus(msg, isErr) {
+  const old = document.getElementById("status");
+  if (old) old.remove();
+  if (!msg) return;
+  const el = document.createElement("div");
+  el.id = "status"; el.textContent = msg;
+  if (isErr) el.className = "err";
+  document.getElementById("map").appendChild(el);
+}
+
+function renderTiers(features) {
+  const counts = {HIGH:0, MEDIUM:0, LOW:0};
+  features.forEach(f => { const t = f.properties.priority_tier; if (t in counts) counts[t]++; });
+  document.getElementById("tiers").innerHTML = Object.entries(counts)
+    .map(([t,n]) => `<span class="chip ${t}">${t} <b>${n}</b></span>`).join("")
+    + `<span class="chip">${features.length} tracts</span>`;
+}
+
+function renderPanel(p) {
+  const tier = p.priority_tier || "NONE";
+  const gap = p.gap;
+  const dir = p.primary_barrier_shap == null ? ""
+    : (p.primary_barrier_shap > 0 ? "widens the gap" : "narrows the gap");
+  document.getElementById("panel").innerHTML = `
+    <h2>Tract detail</h2>
+    <p class="geoid">${p.geoid}</p>
+    <span class="tier ${tier}">${tier === "NONE" ? "NOT SCORED" : tier + " PRIORITY"}</span>
+    <div class="big ${gap > 0 ? "pos" : "neg"}">${gap == null ? "—" : (gap > 0 ? "+" : "") + fmt(gap)}</div>
+    <div class="sub">gap in residential systems per 1,000 households${
+      gap > 0 ? " — fewer than its sunlight supports" : gap < 0 ? " — more than expected" : ""}</div>
+    <h2>Components</h2>
+    <dl>
+      <div class="pair"><dt>Expected adoption</dt><dd>${fmt(p.expected_adoption)}</dd></div>
+      <div class="pair"><dt>Actual adoption</dt><dd>${fmt(p.actual_adoption)}</dd></div>
+      <div class="pair"><dt>Gap percentile</dt><dd>${p.gap_percentile == null ? "—" :
+        (p.gap_percentile*100).toFixed(0) + "%"}</dd></div>
+    </dl>
+    <h2>Dominant factor</h2>
+    <dl>
+      <div class="pair"><dt>${LABELS[p.primary_barrier] || p.primary_barrier || "—"}</dt>
+        <dd>${fmt(p.primary_barrier_shap)}</dd></div>
+    </dl>
+    <div class="sub" style="margin-top:6px">${dir ? "SHAP value — this factor " + dir +
+      " for this tract." : "No attribution available."}</div>
+    <p class="note">Expected and actual are both shown because the gap alone cannot
+       distinguish real untapped potential from a poor expectation. Adoption is DeepSolar's
+       2016 baseline.</p>`;
+}
+
+function style(f) {
+  return {fillColor: colorFor(f.properties.priority_tier), weight: 0.5, color: "#ffffff",
+          fillOpacity: 0.72, opacity: 1};
+}
+
+async function load() {
+  setStatus("Loading tracts…");
+  if (layer) { map.removeLayer(layer); layer = null; }
+  const q = sel.value ? `?county=${sel.value}` : "";
+  try {
+    const r = await fetch(`../geojson/equity${q}`);
+    if (!r.ok) throw new Error(`${r.status} ${(await r.json()).detail || r.statusText}`);
+    const gj = await r.json();
+    if (!gj.features.length) { setStatus("No scored tracts here.", true); return; }
+
+    layer = L.geoJSON(gj, {
+      style,
+      onEachFeature: (f, lyr) => {
+        lyr.bindTooltip(`${f.properties.geoid}<br>gap ${fmt(f.properties.gap)}`, {sticky:true});
+        lyr.on({
+          mouseover: e => e.target.setStyle({weight:2, color:"#15202b"}),
+          mouseout:  e => { if (e.target !== selected) layer.resetStyle(e.target); },
+          click: e => {
+            if (selected) layer.resetStyle(selected);
+            selected = e.target;
+            e.target.setStyle({weight:2.5, color:"#15202b"});
+            renderPanel(f.properties);
+          }
+        });
+      }
+    }).addTo(map);
+
+    // The map lives in a flex column, so Leaflet can still be holding a stale container
+    // size when this fetch resolves. Without the re-measure, fitBounds reads a near-zero
+    // height, snaps to max zoom, and every polygon renders as the degenerate path "M0 0".
+    map.invalidateSize();
+    map.fitBounds(layer.getBounds(), {padding:[18,18], animate:false});
+    renderTiers(gj.features);
+    setStatus(null);
+  } catch (e) {
+    setStatus(`Could not load tracts: ${e.message}. Is EquityGapService running on 8005?`, true);
+    document.getElementById("tiers").innerHTML = "";
+  }
+}
+
+sel.addEventListener("change", load);
+load();
+</script>
+</body>
+</html>
