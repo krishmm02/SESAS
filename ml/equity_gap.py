@@ -162,17 +162,24 @@ def fit() -> tuple[pd.DataFrame, dict]:
           f"R2={ridge_eval['county']['r2']:+.3f} | "
           f"xgb rho={xgb_eval['county']['spearman']:.3f} R2={xgb_eval['county']['r2']:+.3f}")
 
-    # Ridge by deliberate choice, not by score. XGBoost scores higher here (rho 0.113 vs
-    # 0.017) and that is precisely the problem: with GHI spanning only 1.7% statewide, tree
-    # splits on that range are not reading physics, they are reading LOCATION - and location
-    # proxies for county, which proxies for wealth. Selecting on rho picked the model that
-    # leaks hardest, and it put Baltimore City's expectation at 1.30 against Prince George's
-    # 10.62 when both receive effectively identical sunlight. A regularised linear model on
-    # near-constant inputs returns a near-constant expectation, which is the honest answer.
-    stage1 = _ridge()
-    stage1.fit(X1, y1)
+    # The fitted models above exist to be reported, not to score. Neither has skill
+    # (ridge rho 0.017, xgboost 0.113 and only by reading location off a 1.7% GHI range),
+    # so every difference either produces is noise. Scoring with the fitted ridge gave
+    # county median expectations spanning 2.20 to 14.75 - a 6.7x spread - and sent
+    # Somerset, Wicomico and Dorchester to 100% HIGH priority purely because they get
+    # fractionally more sun. That is the Baltimore City distortion again, wearing a
+    # different hat: a skill-less model laundering noise into a ranking.
+    #
+    # Under a uniform-resource hypothesis the honest expectation is the unconditional
+    # centre. Median rather than mean because the target has skew 5.26, so the mean (8.15)
+    # sits above three-fifths of tracts and would manufacture a positive gap nearly
+    # everywhere.
+    baseline = float(df.loc[trainable, TARGET].median())
+    skill = max(ridge_eval["county"]["spearman"], xgb_eval["county"]["spearman"])
+    print(f"  stage 1 has no county-CV skill (best rho={skill:.3f}); "
+          f"using statewide median {baseline:.2f} as the expectation")
 
-    df["expected_adoption"] = np.clip(np.expm1(stage1.predict(df[potential])), 0, None).round(3)
+    df["expected_adoption"] = baseline
     df["actual_adoption"] = df[TARGET]
     df["gap"] = (df["expected_adoption"] - df["actual_adoption"]).round(3)
 
@@ -187,9 +194,27 @@ def fit() -> tuple[pd.DataFrame, dict]:
     stage2.fit(X2, y2)
 
     shap_values = shap.TreeExplainer(stage2).shap_values(X2)
-    top = np.argmax(np.abs(shap_values), axis=1)
-    df.loc[scored, "primary_barrier"] = [barriers[i] for i in top]
-    df.loc[scored, "primary_barrier_shap"] = shap_values[np.arange(len(top)), top].round(4)
+
+    # Rank by SIGNED contribution, not magnitude. Taking argmax(|shap|) named whichever
+    # factor moved the gap most in EITHER direction, so in 98 of 364 HIGH tracts the
+    # "primary barrier" was a factor that shrank the gap - the opposite of a barrier.
+    # Only positive contributions widen a gap, so only those qualify.
+    #
+    # Three are reported rather than one because the barrier features are heavily
+    # collinear (income, poverty, low-income share and minority share all move together).
+    # A tree splits on one of a correlated group and starves the rest of SHAP mass, which
+    # is why a single top factor read as pct_minority in 77% of tracts. Showing the top
+    # three makes that concentration visible instead of hiding it behind one label.
+    order = np.argsort(-shap_values, axis=1)
+    for rank in range(3):
+        idx = order[:, rank]
+        val = shap_values[np.arange(len(idx)), idx].round(4)
+        names = np.where(val > 0, np.array(barriers)[idx], None)
+        df.loc[scored, f"barrier_{rank + 1}"] = names
+        df.loc[scored, f"barrier_{rank + 1}_shap"] = np.where(val > 0, val, np.nan)
+
+    df["primary_barrier"] = df["barrier_1"]
+    df["primary_barrier_shap"] = df["barrier_1_shap"]
 
     # ---- tiers -------------------------------------------------------------------
     df["gap_percentile"] = df["gap"].rank(pct=True).round(4)
@@ -201,6 +226,8 @@ def fit() -> tuple[pd.DataFrame, dict]:
     out = df[[
         "geoid", "actual_adoption", "expected_adoption", "gap", "gap_percentile",
         "priority_tier", "primary_barrier", "primary_barrier_shap",
+        "barrier_1", "barrier_1_shap", "barrier_2", "barrier_2_shap",
+        "barrier_3", "barrier_3_shap",
     ]].copy()
 
     metrics = {
@@ -214,7 +241,14 @@ def fit() -> tuple[pd.DataFrame, dict]:
             "features": potential,
             "ridge": ridge_eval,
             "xgboost": xgb_eval,
-            "selected": "ridge (chosen on principle - see POTENTIAL note; xgboost leaks geography)",
+            "selected": "none - statewide median used as the expectation",
+            "baseline_value": round(baseline, 3),
+            "why": (
+                "Neither fitted model shows county-CV skill, so scoring with one propagates "
+                "noise. The ridge fit gave county median expectations spanning 2.20-14.75 and "
+                "put three Eastern Shore counties at 100% HIGH priority on fractionally more "
+                "sun. The median is the honest expectation under a uniform-resource hypothesis."
+            ),
         },
         "stage2": {
             "features": barriers,

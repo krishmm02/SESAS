@@ -169,11 +169,19 @@ function renderTiers(features) {
     + `<span class="chip">${features.length} tracts</span>`;
 }
 
+// Only factors with a positive SHAP are stored, so anything present here widens the gap.
+function factorRows(p) {
+  const rows = [1,2,3]
+    .map(i => [p[`barrier_${i}`], p[`barrier_${i}_shap`]])
+    .filter(([n, v]) => n && v != null)
+    .map(([n, v]) => `<div class="pair"><dt>${LABELS[n] || n}</dt><dd>+${fmt(v)}</dd></div>`);
+  return rows.length ? rows.join("")
+    : `<div class="pair"><dt>No factor widens this gap</dt><dd>—</dd></div>`;
+}
+
 function renderPanel(p) {
   const tier = p.priority_tier || "NONE";
   const gap = p.gap;
-  const dir = p.primary_barrier_shap == null ? ""
-    : (p.primary_barrier_shap > 0 ? "widens the gap" : "narrows the gap");
   document.getElementById("panel").innerHTML = `
     <h2>Tract detail</h2>
     <p class="geoid">${p.geoid}</p>
@@ -188,13 +196,11 @@ function renderPanel(p) {
       <div class="pair"><dt>Gap percentile</dt><dd>${p.gap_percentile == null ? "—" :
         (p.gap_percentile*100).toFixed(0) + "%"}</dd></div>
     </dl>
-    <h2>Dominant factor</h2>
-    <dl>
-      <div class="pair"><dt>${LABELS[p.primary_barrier] || p.primary_barrier || "—"}</dt>
-        <dd>${fmt(p.primary_barrier_shap)}</dd></div>
-    </dl>
-    <div class="sub" style="margin-top:6px">${dir ? "SHAP value — this factor " + dir +
-      " for this tract." : "No attribution available."}</div>
+    <h2>What widens this gap</h2>
+    <dl>${factorRows(p)}</dl>
+    <div class="sub" style="margin-top:6px">SHAP contributions, largest first. These
+      factors are collinear — income, poverty and minority share move together — so three
+      are listed rather than one.</div>
     <p class="note">Expected and actual are both shown because the gap alone cannot
        distinguish real untapped potential from a poor expectation. Adoption is DeepSolar's
        2016 baseline.</p>`;

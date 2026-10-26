@@ -49,9 +49,13 @@ def get_summary(county: str | None = Query(None, pattern=COUNTY)) -> dict:
         f'FROM scores."{TABLE}"{where} ORDER BY gap DESC NULLS LAST LIMIT 10',
         params,
     )
+    # A null tier means the tract had too few households for a reliable adoption rate.
+    # Keyed separately rather than letting NULL stringify into a "None" key.
+    counts = {r["priority_tier"]: r["n"] for r in tiers if r["priority_tier"]}
     return {
         "county": county,
-        "tier_counts": {r["priority_tier"]: r["n"] for r in tiers},
+        "tier_counts": counts,
+        "unscored": sum(r["n"] for r in tiers if not r["priority_tier"]),
         "highest_gap": worst,
     }
 

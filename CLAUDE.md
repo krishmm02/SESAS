@@ -82,25 +82,50 @@ Naively fitting `adoption ~ f(income, renter_ratio, …)` and taking the residua
 inequity into the baseline** — a poor tract with low adoption yields zero residual because the
 model correctly "expected" low adoption. Do not do this.
 
-**Stage 1** — fit expected adoption from *potential and housing stock only*. Deliberately
-**exclude** income, race, renter ratio, energy burden:
+**Stage 1** — expected adoption from the *physical solar resource only*. Tenure and housing
+type belong in stage 2, not here:
 
 ```python
-POTENTIAL_ONLY = ["specific_yield", "suitable_area_per_capita",
-                  "owner_occupied_units", "median_home_age"]
-expected = model.fit(X[POTENTIAL_ONLY], y_adoption)
-df["gap"] = df["expected_adoption"] - df["actual_adoption"]
+POTENTIAL = ["ghi", "clearness_index", "south_facing_frac", "slope_mean_deg"]
 ```
 
-**Stage 2** — explain the gap using the barrier variables, via SHAP:
+An earlier version also put `owner_rate` and `single_family_detached_rate` here, on the reasoning
+that a renter cannot install panels so tenure is physical capacity. **That inverted the entire
+result.** Baltimore City (owner_rate 0.48, detached 0.14) drew an expectation of 1.37 against an
+actual of 1.06, so its gap was ~0 and only 2% of its tracts came out HIGH — against 22% in
+Howard County, the wealthiest in the state. Tenure and housing type *are* the structural barrier;
+conditioning on them launders the inequity into the baseline.
+
+**Stage 1 does not score.** Across one state these features barely vary (GHI coefficient of
+variation 0.017), and neither Ridge nor XGBoost shows county-CV skill (ρ 0.017 and 0.113, the
+latter only by reading location off that 1.7% range). Scoring with a skill-less fit propagates
+noise: the fitted ridge produced county median expectations spanning **2.20 to 14.75** and sent
+Somerset, Wicomico and Dorchester to 100% HIGH priority on fractionally more sun. The expectation
+is therefore the **statewide median** (3.16), with the fitted models reported only to evidence
+the absence of skill.
 
 ```python
-BARRIERS = ["median_income", "renter_ratio", "energy_burden_pct", "pct_multifamily"]
-gap_model.fit(X[BARRIERS], df["gap"])
+baseline = df[TARGET].median()        # median, not mean - target skew is 5.26
+df["gap"] = baseline - df["actual_adoption"]
 ```
 
-A positive gap means: *this tract has the potential and housing stock to support far more solar
-than it has.* Methodologically this mirrors Sunter et al. (Nature Sustainability, 2019) — cite it.
+**Stage 2** — explain the gap with every structural factor stage 1 was not allowed to see:
+
+```python
+BARRIERS = ["owner_rate", "single_family_detached_rate", "median_year_built",
+            "pop_density_km2", "median_household_income", "median_home_value",
+            "poverty_rate", "energy_burden", "low_income_share", "renter_share",
+            "pct_minority"]
+```
+
+Rank attributions by **signed** SHAP, not magnitude. `argmax(|shap|)` named whichever factor moved
+the gap in either direction, so 98 of 364 HIGH tracts had a "primary barrier" that actually shrank
+their gap. Only positive contributions widen a gap. Three factors are stored rather than one
+because the barriers are heavily collinear — a tree splits on one of a correlated group and starves
+the rest, which is why a single label read `pct_minority` in 77% of tracts.
+
+A positive gap means: *this tract has the sunlight to support more solar than it has.*
+Methodologically this mirrors Sunter et al. (Nature Sustainability, 2019) — cite it.
 
 **Always return `expected_adoption` and `actual_adoption` alongside the gap**, never the
 difference alone. A planner who cannot see both numbers cannot judge whether a high score means
@@ -197,11 +222,11 @@ Update this table as units land. Last synced with `origin/master` at `7464d7b`.
 | — | *Bonus, ahead of schedule:* 1 km grid, OSM power lines, USPVDB labels, `features.grid_features` | Krish | ✅ |
 | 2s | `IrradianceService` FastAPI (8001) | Krish | ✅ |
 | 3s | `TerrainService` FastAPI (8002) | Krish | ✅ |
-| 5s | `SocioEconService` FastAPI (8003) | Rahul | ✅ written, untested |
-| 6s | `AdoptionService` FastAPI (8004) | Rahul | ✅ written, untested |
-| 8 | `EquityGapService` (8005) + `ml/equity_gap.py` two-stage model | Rahul | ✅ written, **not yet trained** |
-| 8v | `VisualizationService` (8006) — GeoJSON, composes over HTTP | Rahul | ✅ written, untested |
-| 9 | Leaflet choropleth consuming `/geojson/equity` | Rahul | ☐ ← **next** |
+| 5s | `SocioEconService` FastAPI (8003) | Rahul | ✅ |
+| 6s | `AdoptionService` FastAPI (8004) | Rahul | ✅ |
+| 8 | `EquityGapService` (8005) + `ml/equity_gap.py` two-stage model | Rahul | ✅ trained, stage 2 ρ=0.541 |
+| 8v | `VisualizationService` (8006) — GeoJSON, composes over HTTP | Rahul | ✅ |
+| 9 | Leaflet dashboard at `/app/` consuming `/geojson/equity` | Rahul | ✅ **midterm build complete** |
 | 10 | `YieldService` — pvlib specific yield | Rahul | ☐ |
 | 11 | `DevelopabilityService` — grid model on `has_pv` | Rahul | ☐ |
 | 12 | `ROIService` — install cost, payback, EIA rates | Rahul | ☐ |
