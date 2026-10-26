@@ -21,3 +21,7 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# a stray copy of .env without the dot slips past the rule above
+env
+.pytest_cache/

@@ -287,7 +287,28 @@ only service that calls another over REST rather than reading PostGIS directly �
 is the point, so keep it that way. Its `/health` reports upstream status so a failure is
 attributable to the right service.
 
-### 4.3 Training the equity model
+### 4.3 Running and testing
+
+```bash
+python scripts/run_services.py            # all six, Ctrl+C stops them
+python scripts/run_services.py --list     # names and ports
+pytest -v                                 # 26 tests
+pytest -v -m "not live"                   # invariants only, no services needed
+```
+
+Dashboard: **http://localhost:8006/app/**
+
+`tests/` holds integration tests, not unit tests, and that is deliberate. The services are
+thin enough that mocking the database would test SQLAlchemy rather than this project, and
+three of the four real bugs this project shipped were semantic — a ranking that inverted, an
+expectation that leaked location — in code that was logically correct. **Every test in
+`test_model_invariants.py` encodes a bug that actually shipped**, and its failure message
+names what broke. Verified by mutation: corrupting the scores in the way each bug corrupted
+them makes the matching test fail.
+
+`test_api_contract.py` doubles as the pre-demo smoke test. If it is green, the dashboard works.
+
+### 4.4 Training the equity model
 
 ```bash
 python scripts/run_pipeline.py      # must have produced features.tract_features
