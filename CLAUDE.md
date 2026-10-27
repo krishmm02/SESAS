@@ -292,7 +292,7 @@ attributable to the right service.
 ```bash
 python scripts/run_services.py            # all six, Ctrl+C stops them
 python scripts/run_services.py --list     # names and ports
-pytest -v                                 # 26 tests
+pytest -v                                 # 39 tests
 pytest -v -m "not live"                   # invariants only, no services needed
 ```
 
@@ -307,6 +307,12 @@ names what broke. Verified by mutation: corrupting the scores in the way each bu
 them makes the matching test fail.
 
 `test_api_contract.py` doubles as the pre-demo smoke test. If it is green, the dashboard works.
+
+**Address search** suggests as you type (`/suggest`, backed by Photon over OpenStreetMap:
+typo- and abbreviation-tolerant, Maryland only). A picked suggestion sends its coordinates to
+`/lookup?lat=&lon=`, so the tract still comes from the Census geocoder (`/geocode/reverse`),
+and its OSM id fetches the building footprint (`/geocode/building`) that the map outlines in
+yellow on satellite imagery. Enter with no suggestion falls back to the exact Census match.
 
 **Demo addresses — verified against the live Census geocoder.** Its address file is
 incomplete (`9000 Rockville Pike, Bethesda, MD` fails even with its ZIP), so never improvise

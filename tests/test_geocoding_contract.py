@@ -102,3 +102,29 @@ def test_lookup_passes_upstream_errors_through(viz_url):
 def test_health_reports_both_upstreams(viz_url):
     up = requests.get(f"{viz_url}/health", timeout=TIMEOUT).json()["upstream"]
     assert up["equity"] == "ok" and up["geocoding"] == "ok"
+
+
+# ------------------------------------------------------------------ search-as-you-type
+@pytest.mark.parametrize("typed,expected", [
+    ("5200 park hieghts ave baltimor", "5200 Park Heights Avenue"),   # misspelled street and city
+    ("1 e prat st", "1 East Pratt Street"),                           # abbreviations plus a typo
+])
+def test_suggest_tolerates_typos(geocode_url, typed, expected):
+    """The whole point of suggestions: the Census geocoder needs the exact address."""
+    sugs = requests.get(f"{geocode_url}/geocode/suggest", params={"q": typed}, timeout=TIMEOUT).json()
+    assert sugs, f"no suggestions for {typed!r}"
+    assert expected in sugs[0]["label"], f"top suggestion for {typed!r} was {sugs[0]['label']!r}"
+    assert all(", MD" in s["label"] for s in sugs), "a non-Maryland suggestion leaked through"
+
+
+def test_picked_suggestion_scores_the_same_tract_with_its_rooftop(viz_url):
+    """Photon picks the point, Census still owns the tract: a picked suggestion must land in
+    the tract the exact-address path finds, and carry the building outline for the map."""
+    body = requests.get(f"{viz_url}/lookup", timeout=TIMEOUT, params={
+        "lat": 39.3489654, "lon": -76.676334, "label": "5200 Park Heights Avenue",
+        "osm_type": "W", "osm_id": 336542893}).json()
+    assert body["location"]["geoid"] == "24510271801"
+    assert body["equity"]["geoid"] == "24510271801"
+    ring = body["building"]["geometry"]["coordinates"][0]
+    assert len(ring) >= 4 and ring[0] == ring[-1], "rooftop outline is not a closed polygon"
+    assert all(-80 < lon < -74 and 37 < lat < 40 for lon, lat in ring), "outline not in lon/lat"

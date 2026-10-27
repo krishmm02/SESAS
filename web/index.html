@@ -34,6 +34,21 @@
     border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;
     border-radius:0 5px 5px 0}
   #search button:disabled{opacity:.55;cursor:default}
+  #search{position:relative}
+  #addr{width:330px}
+  #suggest{position:absolute;top:100%;left:0;right:0;margin:4px 0 0;padding:4px 0;list-style:none;
+           background:#fff;border:1px solid var(--line);border-radius:7px;z-index:2000;
+           box-shadow:0 6px 20px rgba(21,32,43,.14);max-height:340px;overflow-y:auto}
+  #suggest[hidden]{display:none}
+  #suggest li{padding:8px 12px;font-size:13px;line-height:1.35;cursor:pointer;color:var(--ink)}
+  #suggest li small{display:block;font-size:11px;color:var(--ink-soft)}
+  #suggest li[aria-selected="true"],#suggest li:hover{background:#fdf1ea}
+  #suggest li.msg{cursor:default;color:var(--ink-soft);font-size:12px}
+  #suggest li.msg:hover{background:none}
+  .pin{filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
+  .addr-card{background:#fffbea;border:1px solid #f2dc8b;border-radius:6px;padding:9px 11px;
+             margin-bottom:14px;font-size:12px;line-height:1.45}
+  .addr-card b{display:block;font-size:13px;margin-bottom:2px}
   #tiers{display:flex;gap:7px;margin-left:auto;flex-wrap:wrap}
   .chip{font-size:11px;font-family:var(--mono);padding:4px 9px;border-radius:11px;
         border:1px solid var(--line);background:#fff;white-space:nowrap}
@@ -89,8 +104,10 @@
 <header>
   <h1>Solar Equity Gap <span>· Maryland</span></h1>
   <div><label for="county">County</label><select id="county"></select></div>
-  <form id="search"><label for="addr">Address</label><input id="addr" type="text"
-    placeholder="5200 Park Heights Ave, Baltimore MD" autocomplete="off"><button>Find</button></form>
+  <form id="search" role="search"><label for="addr">Address</label><input id="addr" type="text"
+    placeholder="Start typing a Maryland address…" autocomplete="off" spellcheck="false"
+    role="combobox" aria-autocomplete="list" aria-controls="suggest" aria-expanded="false"><button>Find</button>
+    <ul id="suggest" role="listbox" hidden></ul></form>
   <div id="tiers"></div>
 </header>
 
@@ -134,9 +151,18 @@ const colorFor = t => TIER_COLORS[t] || "#d9dee4";
 const map = L.map("map", {zoomControl:true}).setView([39.03, -76.8], 8);
 // Plain OSM tiles: CARTO's basemaps started demanding an API key, and a course project
 // should not carry a credential just to draw a background.
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution:'&copy; OpenStreetMap contributors', maxZoom:19, opacity:0.55
 }).addTo(map);
+// Satellite, so a searched rooftop is visible as a roof. Esri's imagery needs no key.
+const satellite = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  attribution:"Imagery &copy; Esri, Maxar, Earthstar Geographics", maxZoom:19});
+L.control.layers({"Street map": streets, "Satellite": satellite}, null, {position:"topleft"}).addTo(map);
+
+// Zoomed in to a street, tract colour would hide the buildings, so it fades to a tint.
+const CLOSE_ZOOM = 16;
+map.on("zoomend", () => { if (layer) layer.setStyle(f => style(f)); if (selected) highlight(selected); });
 
 const legend = L.control({position:"bottomright"});
 legend.onAdd = () => {
@@ -160,6 +186,8 @@ sel.value = "24510";
 let layer = null, selected = null;
 
 const fmt = (v, d=2) => v == null ? "—" : Number(v).toFixed(d);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+const highlight = l => l.setStyle({weight:2.5, color:"#15202b"});
 
 function setStatus(msg, isErr) {
   const old = document.getElementById("status");
@@ -217,8 +245,10 @@ function renderPanel(p) {
 }
 
 function style(f) {
-  return {fillColor: colorFor(f.properties.priority_tier), weight: 0.5, color: "#ffffff",
-          fillOpacity: 0.72, opacity: 1};
+  const close = map.getZoom() >= CLOSE_ZOOM;
+  return {fillColor: colorFor(f.properties.priority_tier), weight: close ? 1.5 : 0.5,
+          color: close ? colorFor(f.properties.priority_tier) : "#ffffff",
+          fillOpacity: close ? 0.12 : 0.72, opacity: 1};
 }
 
 async function load() {
@@ -241,7 +271,7 @@ async function load() {
           click: e => {
             if (selected) layer.resetStyle(selected);
             selected = e.target;
-            e.target.setStyle({weight:2.5, color:"#15202b"});
+            highlight(e.target);
             renderPanel(f.properties);
           }
         });
@@ -263,51 +293,136 @@ async function load() {
 
 sel.addEventListener("change", load);
 
-// Address search. /lookup chains GeocodingService then EquityGapService, so one call
-// takes a street address all the way to a scored tract.
+// Address search. Typing asks /suggest (OpenStreetMap via Photon: typo-tolerant, Maryland
+// only); picking a suggestion sends its coordinates to /lookup, which finds the 2020 tract
+// through the Census geocoder and scores it. If nothing is picked, Enter falls back to the
+// Census exact-address match, which is what the search did before suggestions existed.
 const form = document.getElementById("search");
 const addr = document.getElementById("addr");
+const list = document.getElementById("suggest");
+let suggestions = [], active = -1, debounce = null, inflight = null;
+let pin = null, roof = null;
 
 function flashPanel(html) {
   document.getElementById("panel").innerHTML = `<h2>Tract detail</h2>${html}`;
 }
 
-form.addEventListener("submit", async ev => {
-  ev.preventDefault();
+function showList(items, message) {
+  suggestions = items; active = -1;
+  list.innerHTML = message ? `<li class="msg">${esc(message)}</li>` : items.map((x, i) => {
+    const [first, ...rest] = x.label.split(", ");
+    return `<li role="option" id="opt-${i}" data-i="${i}"><span>${esc(first)}</span><small>${esc(rest.join(", "))}</small></li>`;
+  }).join("");
+  list.hidden = !message && !items.length;
+  addr.setAttribute("aria-expanded", String(!list.hidden));
+}
+const hideList = () => { list.hidden = true; addr.setAttribute("aria-expanded", "false"); };
+
+function setActive(i) {
+  const opts = list.querySelectorAll("li[role=option]");
+  if (!opts.length) return;
+  active = (i + opts.length) % opts.length;
+  opts.forEach((o, j) => o.setAttribute("aria-selected", String(j === active)));
+  opts[active].scrollIntoView({block:"nearest"});
+  addr.setAttribute("aria-activedescendant", `opt-${active}`);
+}
+
+addr.addEventListener("input", () => {
+  clearTimeout(debounce);
   const q = addr.value.trim();
-  if (!q) return;
+  if (q.length < 3) { hideList(); return; }
+  // Debounced, and each request cancels the last, so a fast typist never sees results for
+  // an older prefix land on top of newer ones - and the public geocoder is not hammered.
+  debounce = setTimeout(async () => {
+    if (inflight) inflight.abort();
+    inflight = new AbortController();
+    showList([], "Searching…");
+    try {
+      const r = await fetch(`../suggest?q=${encodeURIComponent(q)}`, {signal: inflight.signal});
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.detail || r.statusText);
+      body.length ? showList(body) : showList([], "No Maryland matches — keep typing, or press Enter for an exact lookup");
+    } catch (e) {
+      if (e.name !== "AbortError") showList([], `Suggestions unavailable (${e.message}). Press Enter to search the exact address.`);
+    }
+  }, 250);
+});
+
+addr.addEventListener("keydown", e => {
+  if (list.hidden) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); setActive(active + 1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+  else if (e.key === "Escape") { hideList(); }
+});
+// mousedown, not click: click fires after the field's blur has already hidden the list.
+list.addEventListener("mousedown", e => {
+  const li = e.target.closest("li[data-i]");
+  if (!li) return;
+  e.preventDefault();
+  choose(suggestions[+li.dataset.i]);
+});
+addr.addEventListener("blur", () => setTimeout(hideList, 120));
+
+form.addEventListener("submit", ev => {
+  ev.preventDefault();
+  if (suggestions.length) choose(suggestions[Math.max(active, 0)]);
+  else if (addr.value.trim()) search({address: addr.value.trim()});
+});
+
+function choose(sug) {
+  addr.value = sug.label;
+  hideList();
+  const q = {lat: sug.lat, lon: sug.lon, label: sug.label};
+  if (sug.osm_type && sug.osm_id) Object.assign(q, {osm_type: sug.osm_type, osm_id: sug.osm_id});
+  search(q);
+}
+
+const PIN = L.divIcon({className: "pin", iconSize: [30, 42], iconAnchor: [15, 41], html:
+  `<svg width="30" height="42" viewBox="0 0 30 42"><path d="M15 1C7.3 1 1 7.2 1 14.9 1 25.3 15 41 15 41s14-15.7 14-26.1C29 7.2 22.7 1 15 1z"
+     fill="#c1440e" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15" r="5.5" fill="#fff"/></svg>`});
+
+async function search(params) {
   const btn = form.querySelector("button");
   btn.disabled = true; btn.textContent = "…";
   try {
-    const r = await fetch(`../lookup?address=${encodeURIComponent(q)}`);
+    const r = await fetch(`../lookup?${new URLSearchParams(params)}`);
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail || r.statusText);
 
-    const geoid = body.location.geoid;
+    const {location, equity, building} = body;
+    const geoid = location.geoid;
     // Switch counties if the address is outside the one on screen, then select its tract.
-    const county = geoid.slice(0, 5);
-    if (county !== sel.value) { sel.value = county; await load(); }
+    if (geoid.slice(0, 5) !== sel.value) { sel.value = geoid.slice(0, 5); await load(); }
 
     let target = null;
     layer.eachLayer(l => { if (l.feature.properties.geoid === geoid) target = l; });
-    if (target) {
-      if (selected) layer.resetStyle(selected);
-      selected = target;
-      target.setStyle({weight:2.5, color:"#15202b"});
-      map.fitBounds(target.getBounds(), {padding:[90,90], maxZoom:14, animate:false});
-      renderPanel(target.feature.properties);
-    } else {
-      renderPanel(body.equity);
-    }
-    const p = document.getElementById("panel");
-    p.insertAdjacentHTML("afterbegin",
-      `<p class="geoid" style="margin-bottom:10px">matched: ${body.location.matched_address}</p>`);
+    if (selected) layer.resetStyle(selected);
+    selected = target;
+    renderPanel(target ? target.feature.properties : equity);
+
+    // Pin the exact point and outline the rooftop, then fly in on satellite to show it.
+    if (pin) map.removeLayer(pin);
+    if (roof) map.removeLayer(roof);
+    pin = L.marker([location.lat, location.lon], {icon: PIN, zIndexOffset: 1000})
+      .bindTooltip(esc(location.matched_address), {direction: "top", offset: [0, -38]}).addTo(map);
+    roof = building ? L.geoJSON(building, {interactive: false, style: {color: "#ffd400", weight: 3,
+      fillColor: "#ffd400", fillOpacity: 0.35}}).addTo(map) : null;
+    if (!map.hasLayer(satellite)) { map.removeLayer(streets); satellite.addTo(map); }
+    if (roof) map.fitBounds(roof.getBounds(), {maxZoom: 19, padding: [120, 120], animate: false});
+    else map.setView([location.lat, location.lon], 18, {animate: false});
+    if (target) { highlight(target); target.bringToBack(); }
+
+    document.getElementById("panel").insertAdjacentHTML("afterbegin",
+      `<div class="addr-card"><b>${esc(location.matched_address)}</b>${building
+        ? "Rooftop outlined in yellow (building footprint from OpenStreetMap)."
+        : "Pinned on the map. OpenStreetMap has no footprint for this building."}
+        <div class="sub">${esc(location.tract_name || "")} · tract ${esc(geoid)}</div></div>`);
   } catch (e) {
-    flashPanel(`<p class="empty" style="color:var(--hi)">${e.message}</p>`);
+    flashPanel(`<p class="empty" style="color:var(--hi)">${esc(e.message)}</p>`);
   } finally {
     btn.disabled = false; btn.textContent = "Find";
   }
-});
+}
 
 load();
 </script>
