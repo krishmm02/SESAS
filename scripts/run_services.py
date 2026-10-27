@@ -33,6 +33,7 @@ SERVICES = {
     "roi":           8008,
     "developability":8009,
     "yield":         8010,
+    "site":          8011,
     "gateway":       8000,
 }
 
@@ -40,9 +41,9 @@ SERVICES = {
 MODULES = {"yield": "pv_yield"}
 
 # Upstreams listen before the services that call them: visualization calls equity,
-# geocoding and developability; roi calls socioecon and yield; the gateway fronts all.
+# geocoding, developability and site; roi calls socioecon and yield; the gateway fronts all.
 ORDER = ["irradiance", "terrain", "socioecon", "adoption", "equity", "geocoding",
-         "developability", "yield", "roi", "visualization", "gateway"]
+         "developability", "yield", "site", "roi", "visualization", "gateway"]
 
 COLORS = ["\033[36m", "\033[32m", "\033[33m", "\033[35m", "\033[34m", "\033[91m"]
 RESET = "\033[0m"

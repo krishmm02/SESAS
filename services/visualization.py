@@ -18,7 +18,7 @@ import json
 import os
 
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 
 from pipeline.config import ROOT
@@ -26,10 +26,13 @@ from services.common import COUNTY, ping, query
 
 app = FastAPI(title="VisualizationService")
 
-# 127.0.0.1, not localhost: on Windows "localhost" tries IPv6 first and stalls ~2 s per call.
+# 127.0.0.1, not localhost: on Windows "localhost" tries IPv6 first and stalls ~2 s per
+# call, which made every address search take ~4.5 s instead of ~0.5 s.
 EQUITY_URL = os.getenv("EQUITY_SERVICE_URL", "http://127.0.0.1:8005")
 GEOCODE_URL = os.getenv("GEOCODE_SERVICE_URL", "http://127.0.0.1:8007")
 DEVELOPABILITY_URL = os.getenv("DEVELOPABILITY_SERVICE_URL", "http://127.0.0.1:8009")
+SOCIOECON_URL = os.getenv("SOCIOECON_SERVICE_URL", "http://127.0.0.1:8003")
+SITE_URL = os.getenv("SITE_SERVICE_URL", "http://127.0.0.1:8011")
 TIMEOUT = 25
 UPSTREAMS = {"equity": EQUITY_URL, "geocoding": GEOCODE_URL, "developability": DEVELOPABILITY_URL}
 
@@ -131,23 +134,48 @@ def developability_geojson(
     }
 
 
-@app.get("/lookup")
-def lookup(address: str = Query(min_length=5, max_length=200)) -> dict:
-    """Address -> tract -> equity score, in one call.
-
-    Two upstreams chained: GeocodingService resolves the address to a GEOID, then
-    EquityGapService scores it. Neither knows about the other - this is the only place
-    the two are joined, which is what keeps each of them replaceable.
-    """
+def geocoder(path: str, params: dict) -> dict | list:
     try:
-        g = requests.get(f"{GEOCODE_URL}/geocode", params={"address": address}, timeout=TIMEOUT)
+        g = requests.get(f"{GEOCODE_URL}{path}", params=params, timeout=TIMEOUT)
     except requests.RequestException as e:
         raise HTTPException(503, f"GeocodingService unavailable at {GEOCODE_URL}: {e}") from e
     if g.status_code != 200:
         # Pass the upstream's own explanation through rather than flattening it to a 500;
         # "outside Maryland" and "no match" need different fixes from the user.
         raise HTTPException(g.status_code, g.json().get("detail", g.text))
-    located = g.json()
+    return g.json()
+
+
+@app.get("/suggest")
+def suggest(q: str = Query(min_length=3, max_length=200)) -> list[dict]:
+    """Address suggestions for the search box, relayed so the browser stays same-origin."""
+    return geocoder("/geocode/suggest", {"q": q})
+
+
+@app.get("/lookup")
+def lookup(
+    address: str | None = Query(None, min_length=5, max_length=200),
+    lat: float | None = Query(None), lon: float | None = Query(None),
+    label: str | None = Query(None, max_length=200, description="shown as the matched address"),
+    osm_type: str | None = Query(None, pattern="^[WRN]$"), osm_id: int | None = Query(None, gt=0),
+) -> dict:
+    """Address or picked suggestion -> tract -> equity score, in one call.
+
+    Two upstreams chained: GeocodingService resolves the location to a GEOID, then
+    EquityGapService scores it. Neither knows about the other - this is the only place
+    the two are joined, which is what keeps each of them replaceable.
+
+    Pass either ?address= (Census exact match) or the lat/lon of a picked suggestion. With
+    osm_type/osm_id the response also carries the building outline for the map; a missing
+    outline is not an error, the pin alone still locates the address.
+    """
+    if lat is not None and lon is not None:
+        located = geocoder("/geocode/reverse", {"lat": lat, "lon": lon})
+        located["matched_address"] = label or f"{lat:.5f}, {lon:.5f}"
+    elif address:
+        located = geocoder("/geocode", {"address": address})
+    else:
+        raise HTTPException(422, "pass ?address= or both ?lat= and ?lon=")
 
     try:
         e = requests.get(f"{EQUITY_URL}/equity/{located['geoid']}", timeout=TIMEOUT)
@@ -159,7 +187,40 @@ def lookup(address: str = Query(min_length=5, max_length=200)) -> dict:
     if e.status_code != 200:
         raise HTTPException(e.status_code, e.json().get("detail", e.text))
 
-    return {"location": located, "equity": e.json()}
+    # Who lives there, from SocioEconService. It is what explains the 10 unscored tracts -
+    # campuses, bases, prisons and airports, where residents live in group quarters or
+    # nobody lives at all - so the dashboard can say why instead of showing blanks.
+    residents = None
+    try:
+        r = requests.get(f"{SOCIOECON_URL}/socioecon/{located['geoid']}", timeout=TIMEOUT)
+        if r.status_code == 200:
+            residents = {k: r.json().get(k) for k in ("population", "households")}
+    except requests.RequestException:
+        pass  # context only; the score stands without it
+
+    building = None
+    if osm_type and osm_id:
+        try:
+            building = geocoder("/geocode/building", {"osm_type": osm_type, "osm_id": osm_id})
+        except HTTPException:
+            pass  # no outline mapped, or OSM unreachable: the pin is enough
+
+    return {"location": located, "equity": e.json(), "building": building, "residents": residents}
+
+
+@app.get("/site/{endpoint}")
+def site(endpoint: str, request: Request) -> dict:
+    """Relays the panel planner's calls to SolarSiteService, keeping the browser same-origin.
+    Physics only: the planner works on open land, where there are no households to score."""
+    if endpoint not in ("panel", "potential", "estimate"):
+        raise HTTPException(404, f"no site endpoint {endpoint!r}")
+    try:
+        r = requests.get(f"{SITE_URL}/site/{endpoint}", params=request.query_params, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        raise HTTPException(503, f"SolarSiteService unavailable at {SITE_URL}: {e}") from e
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, r.json().get("detail", r.text))
+    return r.json()
 
 
 # Mounted last so it cannot shadow the API routes above.

@@ -39,8 +39,10 @@ TIMES = pd.DatetimeIndex(
 )
 
 
-def tract_yield(lat: float, lon: float, ghi: np.ndarray, dhi: np.ndarray, temp: np.ndarray) -> np.ndarray:
-    """Monthly kWh per kW(dc) for one site. ghi/dhi in kWh/m2/day, temp in C, one value per month."""
+def tract_yield(lat: float, lon: float, ghi: np.ndarray, dhi: np.ndarray, temp: np.ndarray,
+                tilt: float = TILT, azimuth: float = AZIMUTH, temp_params: dict = TEMP_PARAMS) -> np.ndarray:
+    """Monthly kWh per kW(dc) for one site. ghi/dhi in kWh/m2/day, temp in C, one value per month.
+    Defaults are the rooftop case; a ground mount passes its own tilt and open-rack temp_params."""
     sun = pvlib.solarposition.get_solarposition(TIMES, lat, lon)
     cos_z = np.cos(np.radians(sun["apparent_zenith"].to_numpy()))
     shape = pvlib.clearsky.haurwitz(sun["apparent_zenith"])["ghi"].to_numpy().reshape(12, 24)
@@ -52,10 +54,10 @@ def tract_yield(lat: float, lon: float, ghi: np.ndarray, dhi: np.ndarray, temp: 
     dni_h = np.where(cos_z > 0.087, (ghi_h - dhi_h) / np.maximum(cos_z, 0.087), 0)  # sun below 5 deg
 
     poa = pvlib.irradiance.get_total_irradiance(
-        TILT, AZIMUTH, sun["apparent_zenith"], sun["azimuth"], dni_h, ghi_h, dhi_h,
+        tilt, azimuth, sun["apparent_zenith"], sun["azimuth"], dni_h, ghi_h, dhi_h,
         albedo=ALBEDO, model="isotropic",
     )["poa_global"].fillna(0).to_numpy()
-    t_cell = pvlib.temperature.sapm_cell(poa, np.repeat(temp, 24), WIND_MS, **TEMP_PARAMS)
+    t_cell = pvlib.temperature.sapm_cell(poa, np.repeat(temp, 24), WIND_MS, **temp_params)
     dc = pvlib.pvsystem.pvwatts_dc(poa, t_cell, pdc0=1000, gamma_pdc=GAMMA_PDC)  # W per kW(dc)
     ac = dc * (1 - LOSSES) * INVERTER_EFF
     return ac.reshape(12, 24).sum(axis=1) / 1000 * np.array(DAYS)  # kWh per month
