@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SESAS — Solar Equity Gap, Maryland</title>
+<title>SESAS — Solar Equity &amp; Siting, Maryland</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
   :root {
@@ -33,6 +33,9 @@
   .chip.HIGH{background:#fdecea;border-color:#f3c0b9;color:var(--hi)}
   .chip.MEDIUM{background:#fef4ec;border-color:#f6d9c2;color:#9a4f12}
   .chip.LOW{background:#eef4fa;border-color:#cfe0ef;color:#2166ac}
+  .layers{display:flex;gap:14px;font-size:13px}
+  .layers label{text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);
+                font-weight:500;margin:0;cursor:pointer}
 
   main{flex:1;display:flex;min-height:0}
   #map{flex:1;min-width:0;background:var(--ground)}
@@ -47,6 +50,7 @@
   .tier.MEDIUM{background:#fef4ec;color:#9a4f12}
   .tier.LOW{background:#eef4fa;color:#2166ac}
   .tier.NONE{background:#f0f2f5;color:var(--ink-soft)}
+  .tier.SITE{background:#e7f4e4;color:#1b7837}
 
   .pair{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
         padding:9px 0;border-bottom:1px solid var(--line)}
@@ -79,8 +83,12 @@
 <body>
 
 <header>
-  <h1>Solar Equity Gap <span>· Maryland</span></h1>
+  <h1>Solar Equity &amp; Siting <span>· Maryland</span></h1>
   <div><label for="county">County</label><select id="county"></select></div>
+  <div class="layers">
+    <label><input type="checkbox" id="show-equity" checked> Rooftop equity (tracts)</label>
+    <label><input type="checkbox" id="show-grid"> Utility-scale siting (1 km)</label>
+  </div>
   <div id="tiers"></div>
 </header>
 
@@ -88,9 +96,11 @@
   <div id="map"><div id="status">Loading tracts…</div></div>
   <aside>
     <div id="panel">
-      <h2>Tract detail</h2>
-      <p class="empty">Click any tract to see its expected versus actual adoption and the
-         structural factor driving its gap.</p>
+      <h2>Detail</h2>
+      <p class="empty">Click a tract to see its expected versus actual adoption, the
+         structural factors driving its gap, and what a rooftop system would cost there.
+         Turn on the siting layer and click a 1 km cell to see why it scores as a solar
+         farm site.</p>
     </div>
   </aside>
 </main>
@@ -111,7 +121,12 @@ const LABELS = {
   median_home_value:"Median home value", single_family_detached_rate:"Detached homes",
   owner_rate:"Owner-occupancy", pop_density_km2:"Population density",
   low_income_share:"Low-income share", energy_burden:"Energy burden",
-  poverty_rate:"Poverty rate", renter_share:"Renter share", median_year_built:"Housing vintage"
+  poverty_rate:"Poverty rate", renter_share:"Renter share", median_year_built:"Housing vintage",
+  slope_mean_deg:"slope", flat_frac:"flat land share", south_facing_frac:"south-facing share",
+  elev_mean_m:"elevation", elev_range_m:"terrain relief", lc_tree_frac:"forest cover",
+  lc_grass_frac:"grassland", lc_crop_frac:"cropland", lc_water_frac:"water",
+  lc_wetland_frac:"wetland", dist_line_km:"distance to power line",
+  dist_substation_km:"distance to substation"
 };
 
 // Colour by priority tier, not by raw gap. Tiers come from the statewide gap percentile, so
@@ -128,26 +143,36 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution:'&copy; OpenStreetMap contributors', maxZoom:19, opacity:0.55
 }).addTo(map);
 
+// Siting uses a separate green scale so the two layers never read as the same measure.
+const GRID_COLORS = {HIGH:"#1b7837", MEDIUM:"#7fbf7b", LOW:"#d9f0d3", EXCLUDED:"#c9ced6"};
+const legendRows = rows => rows.map(([c,t]) => `<i style="background:${c}"></i>${t}<br>`).join("");
+const EQUITY_LEGEND = '<div class="t">Rooftop intervention priority</div>' + legendRows([
+  ["#b2182b","High — top quartile gap"], ["#ef8a62","Medium"],
+  ["#4393c3","Low — at or above expectation"], ["#d9dee4","Not scored"]]);
+const GRID_LEGEND = '<div class="t" style="margin-top:6px">Solar farm siting (1 km)</div>' + legendRows([
+  ["#1b7837","High — top 5% of cells"], ["#7fbf7b","Medium — next 20%"], ["#d9f0d3","Low"],
+  ["#c9ced6","Developed land — excluded"]]) +
+  '<i style="background:none;border:2px solid #15202b"></i>Existing farm<br>';
+
 const legend = L.control({position:"bottomright"});
-legend.onAdd = () => {
-  const d = L.DomUtil.create("div","legend");
-  const rows = [
-    ["#b2182b","High — top quartile gap"],
-    ["#ef8a62","Medium"],
-    ["#4393c3","Low — at or above expectation"],
-    ["#d9dee4","Not scored"]
-  ];
-  d.innerHTML = '<div class="t">Intervention priority</div>' +
-    rows.map(([c,t]) => `<i style="background:${c}"></i>${t}<br>`).join("");
-  return d;
-};
+legend.onAdd = () => L.DomUtil.create("div","legend");
 legend.addTo(map);
+function renderLegend() {
+  const el = legend.getContainer();
+  el.innerHTML = (showEquity.checked ? EQUITY_LEGEND : "") + (showGrid.checked ? GRID_LEGEND : "");
+  el.style.display = showEquity.checked || showGrid.checked ? "" : "none";
+}
 
 const sel = document.getElementById("county");
 Object.entries(COUNTIES).forEach(([v,n]) => sel.add(new Option(n, v)));
 sel.value = "24510";
+const showEquity = document.getElementById("show-equity");
+const showGrid = document.getElementById("show-grid");
 
-let layer = null, selected = null;
+let layer = null, gridLayer = null, selected = null;
+// Each load takes a ticket; a response whose ticket is no longer current is dropped, so a
+// slow earlier request (say, the previous county) can never draw over a newer one.
+let equityTicket = 0, gridTicket = 0;
 
 const fmt = (v, d=2) => v == null ? "—" : Number(v).toFixed(d);
 
@@ -201,9 +226,65 @@ function renderPanel(p) {
     <div class="sub" style="margin-top:6px">SHAP contributions, largest first. These
       factors are collinear — income, poverty and minority share move together — so three
       are listed rather than one.</div>
+    <h2>Rooftop economics</h2>
+    <dl id="roi"><div class="pair"><dt>Loading…</dt><dd></dd></div></dl>
     <p class="note">Expected and actual are both shown because the gap alone cannot
        distinguish real untapped potential from a poor expectation. Adoption is DeepSolar's
        2016 baseline.</p>`;
+  loadRoi(p.geoid);
+}
+
+// ROIService composes YieldService and SocioEconService; reached through the gateway.
+async function loadRoi(geoid) {
+  const el = document.getElementById("roi");
+  try {
+    const r = await fetch(`../roi/${geoid}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const x = await r.json();
+    if (x.error) throw new Error(x.error);
+    if (el !== document.getElementById("roi")) return;  // user clicked elsewhere meanwhile
+    const pct = v => v == null ? "—" : (v * 100).toFixed(0) + "%";
+    const usd = v => "$" + Number(v).toLocaleString();
+    el.innerHTML = [
+      ["System sized to household use", `${fmt(x.system_kw, 1)} kW`],
+      ["Annual output", `${Number(x.annual_kwh).toLocaleString()} kWh`],
+      ["Installed cost", usd(x.net_cost)],
+      ["Annual bill savings", usd(x.annual_savings)],
+      ["Simple payback", `${fmt(x.simple_payback_years, 1)} yr`],
+      ["Cost as share of median income", pct(x.net_cost_share_of_income)],
+    ].map(([k, v]) => `<div class="pair"><dt>${k}</dt><dd>${v}</dd></div>`).join("") +
+      `<div class="sub" style="margin-top:6px">No federal credit (ended 2025). Payback is
+       near-identical statewide because sunlight is; the upfront cost against income is not.</div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="sub">Unavailable (${e.message}). Open the dashboard through
+      the gateway on port 8000, with Yield and ROI services running.</div>`;
+  }
+}
+
+// Drivers arrive as "low dist_substation_km" - direction, then feature name.
+function renderCell(p) {
+  const tier = p.tier || "NONE";
+  const drivers = [1,2,3].filter(i => p[`driver_${i}`]).map(i => {
+    const [dir, name] = p[`driver_${i}`].split(" ");
+    return `<div class="pair"><dt>${dir === "low" ? "Low" : "High"} ${LABELS[name] || name}</dt>
+            <dd>+${fmt(p[`driver_${i}_shap`])}</dd></div>`;
+  });
+  const excluded = tier === "EXCLUDED";
+  document.getElementById("panel").innerHTML = `
+    <h2>1 km cell</h2>
+    <p class="geoid">cell ${p.cell_id}${p.county ? " · " + (COUNTIES[p.county] || p.county) : ""}</p>
+    <span class="tier ${excluded ? "NONE" : "SITE"}">${excluded ? "EXCLUDED — DEVELOPED LAND" : tier + " SITING SCORE"}</span>
+    ${excluded ? '<div class="sub">At least 40% built-up, so not scored as a solar farm site.</div>' :
+      `<div class="big">${(p.score_percentile * 100).toFixed(0)}<span style="font-size:15px">th percentile</span></div>
+       <div class="sub">among undeveloped Maryland land cells</div>`}
+    <h2>Why it scores this way</h2>
+    <dl>${drivers.join("") || '<div class="pair"><dt>No factor raises this cell</dt><dd>—</dd></div>'}</dl>
+    <h2>Existing solar</h2>
+    <dl><div class="pair"><dt>Farm already here</dt><dd>${p.has_pv ? "Yes, since " + p.pv_first_year : "No"}</dd></div></dl>
+    <p class="note">Learned from where Maryland's existing farms were built (USPVDB). It beats
+       "nearest substation" and "most sunlight" baselines under spatial cross-validation;
+       sunlight alone does worse than chance. Land-cover classes that can see existing panels
+       are excluded.</p>`;
 }
 
 function style(f) {
@@ -212,13 +293,51 @@ function style(f) {
 }
 
 async function load() {
-  setStatus("Loading tracts…");
+  renderLegend();
+  await Promise.all([loadEquity(), loadGrid()]);
+}
+
+async function loadGrid() {
+  const ticket = ++gridTicket;
+  if (gridLayer) { map.removeLayer(gridLayer); gridLayer = null; }
+  if (!showGrid.checked) return;
+  const q = sel.value ? `?county=${sel.value}` : "";  // statewide defaults to HIGH cells only
+  try {
+    const r = await fetch(`../geojson/developability${q}`);
+    if (!r.ok) throw new Error(`${r.status} ${(await r.json()).detail || r.statusText}`);
+    const gj = await r.json();
+    if (ticket !== gridTicket) return;
+    gridLayer = L.geoJSON(gj, {
+      style: f => ({fillColor: GRID_COLORS[f.properties.tier] || "#eeeeee", fillOpacity: 0.8,
+                    weight: f.properties.has_pv ? 2 : 0.3,
+                    color: f.properties.has_pv ? "#15202b" : "#ffffff"}),
+      onEachFeature: (f, lyr) => {
+        lyr.bindTooltip(`cell ${f.properties.cell_id}<br>${f.properties.tier} siting`, {sticky:true});
+        lyr.on("click", () => renderCell(f.properties));
+      }
+    }).addTo(map);
+    if (!layer) {  // the tract layer, when shown, owns the view
+      map.invalidateSize();
+      map.fitBounds(gridLayer.getBounds(), {padding:[18,18], animate:false});
+    }
+  } catch (e) {
+    if (ticket !== gridTicket) return;
+    setStatus(`Could not load siting cells: ${e.message}. Is DevelopabilityService running on 8009?`, true);
+  }
+}
+
+async function loadEquity() {
+  const ticket = ++equityTicket;
   if (layer) { map.removeLayer(layer); layer = null; }
+  document.getElementById("tiers").innerHTML = "";
+  if (!showEquity.checked) return;
+  setStatus("Loading tracts…");
   const q = sel.value ? `?county=${sel.value}` : "";
   try {
     const r = await fetch(`../geojson/equity${q}`);
     if (!r.ok) throw new Error(`${r.status} ${(await r.json()).detail || r.statusText}`);
     const gj = await r.json();
+    if (ticket !== equityTicket) return;
     if (!gj.features.length) { setStatus("No scored tracts here.", true); return; }
 
     layer = L.geoJSON(gj, {
@@ -237,6 +356,7 @@ async function load() {
         });
       }
     }).addTo(map);
+    if (gridLayer) gridLayer.bringToFront();
 
     // The map lives in a flex column, so Leaflet can still be holding a stale container
     // size when this fetch resolves. Without the re-measure, fitBounds reads a near-zero
@@ -246,12 +366,15 @@ async function load() {
     renderTiers(gj.features);
     setStatus(null);
   } catch (e) {
+    if (ticket !== equityTicket) return;
     setStatus(`Could not load tracts: ${e.message}. Is EquityGapService running on 8005?`, true);
     document.getElementById("tiers").innerHTML = "";
   }
 }
 
 sel.addEventListener("change", load);
+showEquity.addEventListener("change", () => { renderLegend(); loadEquity(); });
+showGrid.addEventListener("change", () => { renderLegend(); loadGrid(); });
 load();
 </script>
 </body>

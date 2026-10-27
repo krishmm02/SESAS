@@ -1,22 +1,19 @@
 """Two-stage equity gap model.
 
-Stage 1 predicts the rooftop adoption a tract *should* have from its solar potential and
-housing stock alone, deliberately excluding income, tenure, race and energy burden. The
-residual (expected - actual) is the gap. Stage 2 then explains that gap using only those
-excluded barrier variables, and SHAP names the dominant one per tract.
+Stage 1 asks what rooftop adoption a tract *should* have from its physical solar resource
+alone, deliberately excluding income, tenure, housing type, race and energy burden. Fitted
+models on that resource have no county-CV skill in Maryland (sunlight is near-uniform), so
+the expectation is the statewide median; the fits are still run and reported as evidence.
+The residual (expected - actual) is the gap. Stage 2 explains that gap using only the
+excluded structural variables, and signed SHAP names the top three that widen it.
 
 Fitting stage 1 with the barrier variables included would launder the inequity into the
 baseline: a low-income tract with low adoption would produce a zero residual, because the
 model "correctly" expected little of it. Excluding them is the whole point.
 
-Design tension worth knowing: owner_rate sits in stage 1 (a renter physically cannot
-install) while renter_share sits in stage 2 (renter-dominated areas face a structural
-barrier). They are near-complements from different sources, so part of the tenure effect
-is absorbed before stage 2 sees it. Move owner_rate to BARRIERS to test the alternative.
-
 Outputs:
     scores.tract_equity       one row per tract
-    models/equity_stage1.json, equity_stage2.json, equity_metrics.json
+    models/equity_metrics.json
 """
 
 from __future__ import annotations

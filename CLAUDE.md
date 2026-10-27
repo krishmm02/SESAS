@@ -227,11 +227,11 @@ Update this table as units land. Last synced with `origin/master` at `7464d7b`.
 | 8 | `EquityGapService` (8005) + `ml/equity_gap.py` two-stage model | Rahul | ✅ trained, stage 2 ρ=0.541 |
 | 8v | `VisualizationService` (8006) — GeoJSON, composes over HTTP | Rahul | ✅ |
 | 9 | Leaflet dashboard at `/app/` consuming `/geojson/equity` | Rahul | ✅ **midterm build complete** |
-| 10 | `YieldService` — pvlib specific yield | Rahul | ☐ |
-| 11 | `DevelopabilityService` — grid model on `has_pv` | Rahul | ☐ |
-| 12 | `ROIService` — install cost, payback, EIA rates | Rahul | ☐ |
-| 13 | API Gateway + Redis caching | Rahul | ☐ |
-| 14 | Full dashboard — both layers, detail panel | Rahul | ☐ |
+| 10 | `YieldService` (8007) — pvlib specific yield, `pipeline/pv_yield.py` → `features.tract_yield` | Krish | ✅ ~1,270 kWh/kW/yr, ±1.5% statewide |
+| 11 | `DevelopabilityService` (8009) + `ml/developability.py` — grid model on `has_pv` | Krish | ✅ logistic, spatial AUC 0.80 vs substation 0.75, irradiance 0.43 |
+| 12 | `ROIService` (8008) — composes Yield + SocioEcon over REST | Krish | ✅ |
+| 13 | API Gateway (8000) — in-process TTL cache instead of Redis (cut list #1) | Krish | ✅ |
+| 14 | Full dashboard — both layers toggleable, tract ROI + cell detail panels | Krish | ✅ **endterm build complete** |
 
 **Units 1–9 = midterm. Units 10–14 = endterm.**
 
@@ -279,12 +279,21 @@ uvicorn services.terrain:app       --port 8002
 uvicorn services.socioecon:app     --port 8003
 uvicorn services.adoption:app      --port 8004
 uvicorn services.equity:app        --port 8005   # needs scripts/train_equity.py first
-uvicorn services.visualization:app --port 8006   # needs 8005 running
+uvicorn services.visualization:app --port 8006   # needs 8005 and 8009 running
+uvicorn services.pv_yield:app      --port 8007   # needs pipeline step tract_yield
+uvicorn services.roi:app           --port 8008   # needs 8003 and 8007 running
+uvicorn services.developability:app --port 8009  # needs scripts/train_developability.py first
+uvicorn services.gateway:app       --port 8000   # routes /<service>/... to the ports above
 ```
 
-`VisualizationService` reads `EQUITY_SERVICE_URL` (default `http://localhost:8005`). It is the
-only service that calls another over REST rather than reading PostGIS directly — that composition
-is the point, so keep it that way. Its `/health` reports upstream status so a failure is
+Or start everything at once: `python scripts/run_services.py`, then open
+`http://127.0.0.1:8000/app/`. Use 127.0.0.1, not localhost: on Windows localhost tries IPv6
+first and adds ~2 s to every service-to-service call.
+
+`VisualizationService` reads `EQUITY_SERVICE_URL` and `DEVELOPABILITY_SERVICE_URL`; `ROIService`
+reads `YIELD_SERVICE_URL` and `SOCIOECON_SERVICE_URL`. These, and the gateway, are the services
+that call others over REST rather than reading PostGIS directly — that composition
+is the point, so keep it that way. Each one's `/health` reports upstream status so a failure is
 attributable to the right service.
 
 ### 4.3 Training the equity model
