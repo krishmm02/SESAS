@@ -292,7 +292,7 @@ attributable to the right service.
 ```bash
 python scripts/run_services.py            # all six, Ctrl+C stops them
 python scripts/run_services.py --list     # names and ports
-pytest -v                                 # 40 tests
+pytest -v                                 # 45 tests
 pytest -v -m "not live"                   # invariants only, no services needed
 ```
 
@@ -307,6 +307,18 @@ names what broke. Verified by mutation: corrupting the scores in the way each bu
 them makes the matching test fail.
 
 `test_api_contract.py` doubles as the pre-demo smoke test. If it is green, the dashboard works.
+
+**Solar panel planner** ("☀ Plan solar panels", or "Plan panels on this roof" after a search)
+lays modules on the searched rooftop or a drawn patch of open land: a suggested maximum, a
+count box, drag-and-drop from a tray (or click-to-place), drag to move, right-click to remove.
+Layout geometry runs in the browser (`web/planner.js`) using the module and spacing rules from
+`SolarSiteService` (`services/site.py`, port 8011, relayed at `/site/*` by VisualizationService),
+which estimates the layout's energy with pvlib on NASA POWER climatology at that exact point -
+kWh, kW, capacity factor, CO2; prices and payback are endterm. It is physics
+only - no SocioEcon or equity data - so it works the same on open land. Three mounts: pitched
+roof (flush, south-nearer slope only), flat roof (10° racks facing south), ground (30° racks,
+GCR 0.4). OSM does not record roof shape, so the default is a guess from the building tag and
+size; the mount menu overrides it.
 
 **Address search** suggests as you type (`/suggest`, backed by Photon over OpenStreetMap:
 typo- and abbreviation-tolerant, Maryland only). A picked suggestion sends its coordinates to

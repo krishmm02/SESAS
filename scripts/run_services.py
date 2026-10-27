@@ -30,11 +30,12 @@ SERVICES = {
     "equity":        8005,
     "visualization": 8006,
     "geocoding":     8007,
+    "site":          8011,
 }
 
-# visualization calls equity and geocoding over REST, so both listen before it starts.
+# visualization calls equity, geocoding and site over REST, so they listen before it starts.
 ORDER = ["irradiance", "terrain", "socioecon", "adoption",
-         "equity", "geocoding", "visualization"]
+         "equity", "geocoding", "site", "visualization"]
 
 COLORS = ["\033[36m", "\033[32m", "\033[33m", "\033[35m", "\033[34m", "\033[91m"]
 RESET = "\033[0m"

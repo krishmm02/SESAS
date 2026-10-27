@@ -17,6 +17,7 @@ dependencies:
   - scikit-learn
   - xgboost
   - shap
+  - pvlib
   - matplotlib
   - seaborn
   - jupyterlab

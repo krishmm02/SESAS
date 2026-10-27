@@ -17,7 +17,7 @@ import json
 import os
 
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 
 from pipeline.config import ROOT
@@ -30,6 +30,7 @@ app = FastAPI(title="VisualizationService")
 EQUITY_URL = os.getenv("EQUITY_SERVICE_URL", "http://127.0.0.1:8005")
 GEOCODE_URL = os.getenv("GEOCODE_SERVICE_URL", "http://127.0.0.1:8007")
 SOCIOECON_URL = os.getenv("SOCIOECON_SERVICE_URL", "http://127.0.0.1:8003")
+SITE_URL = os.getenv("SITE_SERVICE_URL", "http://127.0.0.1:8011")
 TIMEOUT = 25
 
 # Tolerance in metres (geometry is stored in EPSG:26985). 25 m keeps tract shapes
@@ -165,6 +166,21 @@ def lookup(
             pass  # no outline mapped, or OSM unreachable: the pin is enough
 
     return {"location": located, "equity": e.json(), "building": building, "residents": residents}
+
+
+@app.get("/site/{endpoint}")
+def site(endpoint: str, request: Request) -> dict:
+    """Relays the panel planner's calls to SolarSiteService, keeping the browser same-origin.
+    Physics only: the planner works on open land, where there are no households to score."""
+    if endpoint not in ("panel", "potential", "estimate"):
+        raise HTTPException(404, f"no site endpoint {endpoint!r}")
+    try:
+        r = requests.get(f"{SITE_URL}/site/{endpoint}", params=request.query_params, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        raise HTTPException(503, f"SolarSiteService unavailable at {SITE_URL}: {e}") from e
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, r.json().get("detail", r.text))
+    return r.json()
 
 
 # Mounted last so it cannot shadow the API routes above.
