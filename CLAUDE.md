@@ -303,7 +303,7 @@ attributable to the right service.
 ```bash
 python scripts/run_services.py            # all eleven, Ctrl+C stops them
 python scripts/run_services.py --list     # names and ports
-pytest -v                                 # 46 tests
+pytest -v                                 # 47 tests
 pytest -v -m "not live"                   # invariants only, no services needed
 ```
 
@@ -326,7 +326,9 @@ count box, drag-and-drop from a tray (or click-to-place), drag to move, right-cl
 Layout geometry runs in the browser (`web/planner.js`) using the module and spacing rules from
 `SolarSiteService` (`services/site.py`, port 8011, relayed at `/site/*` by VisualizationService),
 which estimates the layout's energy with pvlib on NASA POWER climatology at that exact point -
-kWh, kW, capacity factor, CO2; prices and payback are endterm. It is physics
+kWh, kW, capacity factor, CO2. On this endterm branch ROIService adds the cost layer for a
+layout (`/roi/layout`: savings, installed cost, payback, 25-year savings, editable prices), and
+the planner reaches it through the gateway, falling back to energy only. SolarSiteService is physics
 only - no SocioEcon or equity data - so it works the same on open land. Three mounts: pitched
 roof (flush, south-nearer slope only), flat roof (10° racks facing south), ground (30° racks,
 GCR 0.4). OSM does not record roof shape, so the default is a guess from the building tag and

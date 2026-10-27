@@ -59,9 +59,26 @@ def test_output_scales_with_panel_count(site_url):
 
 
 def test_energy_only_no_money(site_url):
-    """The midterm planner reports energy; prices and payback are the endterm cost layer."""
+    """SolarSiteService reports energy; prices and payback live in ROIService (/roi/layout)."""
     body = estimate(site_url, panels=10)
     assert not {"annual_savings", "net_cost", "simple_payback_years"} & body.keys()
+
+
+ROI = "http://127.0.0.1:8008"
+
+
+def test_roi_prices_a_layout_from_site_energy(site_url):
+    """/roi/layout must price exactly the kWh SolarSiteService reports, and payback must not
+    depend on array size (cost and savings both scale linearly with panels)."""
+    if not _listening(ROI):
+        pytest.skip(f"ROIService not listening on {ROI}")
+    params = {**BALTIMORE, "panels": 10, "price_per_kwh": 0.20, "cost_per_w": 2.5}
+    small = requests.get(f"{ROI}/roi/layout", params=params, timeout=TIMEOUT).json()
+    big = requests.get(f"{ROI}/roi/layout", params={**params, "panels": 40}, timeout=TIMEOUT).json()
+    assert small["annual_kwh"] == estimate(site_url, panels=10)["annual_kwh"]
+    assert small["annual_savings"] == round(small["annual_kwh"] * 0.20)
+    assert small["net_cost"] == 10 * 400 * 2.5
+    assert abs(small["simple_payback_years"] - big["simple_payback_years"]) <= 0.1
 
 
 def test_point_outside_maryland_is_rejected(site_url):

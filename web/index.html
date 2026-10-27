@@ -122,6 +122,11 @@
   #pl-mount{min-width:0}
   .fit{background:#eef4fa;border:1px solid #cfe0ef;border-radius:6px;padding:9px 11px;font-size:12px;margin:8px 0}
   .hint{background:#fffbea;border:1px solid #f2dc8b;border-radius:6px;padding:8px 10px;font-size:12px;margin:8px 0}
+  details.adv summary{font-size:11px;color:var(--ink-soft);cursor:pointer;margin:8px 0;text-transform:uppercase;
+                      letter-spacing:.06em;font-weight:600}
+  details.adv label{display:flex;justify-content:space-between;align-items:center;text-transform:none;
+                    letter-spacing:0;font-size:12px;font-weight:500;color:var(--ink-mid);margin:6px 0}
+  details.adv input{width:84px;font-family:var(--mono);font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:4px}
   .chart{position:relative}
   .chart .ax{font-size:10px;fill:var(--ink-soft)}
   .chart .pk{font-size:10px;fill:var(--ink-mid);font-family:var(--mono)}
@@ -188,6 +193,14 @@
 
       <h2>Results</h2>
       <div id="pl-results"></div>
+
+      <details class="adv"><summary>Prices and assumptions</summary>
+        <label>Electricity price ($/kWh) <input id="pl-price" type="number" step="0.01" min="0.01" value="0.2177"></label>
+        <label>Installed cost ($/W) <input id="pl-cost" type="number" step="0.05" min="0.1" value="2.59"></label>
+        <label>Incentives (% of cost) <input id="pl-credit" type="number" step="1" min="0" max="99" value="0"></label>
+        <div class="sub">Defaults: EIA Maryland residential price (May 2026), EnergySage Maryland installed
+          price (Aug 2026). Large ground arrays usually cost less per watt — lower it for a field.</div>
+      </details>
     </div>
   </aside>
 </main>

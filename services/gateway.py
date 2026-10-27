@@ -37,6 +37,8 @@ ROUTES = {
     "developability": 8009,
     "yield": 8010,
     "lookup": 8006,  # VisualizationService: address -> geocoding -> equity
+    "suggest": 8006,  # VisualizationService relays address suggestions
+    "site": 8011,
 }
 TIMEOUT = 30
 CACHE_TTL = 300
