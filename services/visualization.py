@@ -29,6 +29,7 @@ app = FastAPI(title="VisualizationService")
 # call, which made every address search take ~4.5 s instead of ~0.5 s.
 EQUITY_URL = os.getenv("EQUITY_SERVICE_URL", "http://127.0.0.1:8005")
 GEOCODE_URL = os.getenv("GEOCODE_SERVICE_URL", "http://127.0.0.1:8007")
+SOCIOECON_URL = os.getenv("SOCIOECON_SERVICE_URL", "http://127.0.0.1:8003")
 TIMEOUT = 25
 
 # Tolerance in metres (geometry is stored in EPSG:26985). 25 m keeps tract shapes
@@ -145,6 +146,17 @@ def lookup(
     if e.status_code != 200:
         raise HTTPException(e.status_code, e.json().get("detail", e.text))
 
+    # Who lives there, from SocioEconService. It is what explains the 10 unscored tracts -
+    # campuses, bases, prisons and airports, where residents live in group quarters or
+    # nobody lives at all - so the dashboard can say why instead of showing blanks.
+    residents = None
+    try:
+        r = requests.get(f"{SOCIOECON_URL}/socioecon/{located['geoid']}", timeout=TIMEOUT)
+        if r.status_code == 200:
+            residents = {k: r.json().get(k) for k in ("population", "households")}
+    except requests.RequestException:
+        pass  # context only; the score stands without it
+
     building = None
     if osm_type and osm_id:
         try:
@@ -152,7 +164,7 @@ def lookup(
         except HTTPException:
             pass  # no outline mapped, or OSM unreachable: the pin is enough
 
-    return {"location": located, "equity": e.json(), "building": building}
+    return {"location": located, "equity": e.json(), "building": building, "residents": residents}
 
 
 # Mounted last so it cannot shadow the API routes above.

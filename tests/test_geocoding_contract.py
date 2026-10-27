@@ -128,3 +128,13 @@ def test_picked_suggestion_scores_the_same_tract_with_its_rooftop(viz_url):
     ring = body["building"]["geometry"]["coordinates"][0]
     assert len(ring) >= 4 and ring[0] == ring[-1], "rooftop outline is not a closed polygon"
     assert all(-80 < lon < -74 and 37 < lat < 40 for lon, lat in ring), "outline not in lon/lat"
+
+
+def test_unscored_tract_says_why(viz_url):
+    """UMBC's tract has 3,516 residents in 17 households, under the 50-household floor, so it
+    has no gap. The lookup must still answer, with the counts that explain the blank."""
+    body = requests.get(f"{viz_url}/lookup", timeout=TIMEOUT,
+                        params={"lat": 39.2554, "lon": -76.7110, "label": "UMBC"}).json()
+    assert body["location"]["geoid"] == "24005492500"
+    assert body["equity"]["gap"] is None and body["equity"]["priority_tier"] is None
+    assert body["residents"]["households"] < 50 < body["residents"]["population"]

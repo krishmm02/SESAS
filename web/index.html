@@ -217,7 +217,30 @@ function factorRows(p) {
     : `<div class="pair"><dt>No factor widens this gap</dt><dd>—</dd></div>`;
 }
 
-function renderPanel(p) {
+// 10 tracts have no adoption rate: DeepSolar's rate is noise under 50 households. They are
+// campuses, bases, prisons, airports and parks. Expected adoption is the statewide median
+// and so exists for every tract - showing it alone beside blanks reads as a broken score.
+function renderUnscored(p, residents) {
+  const pop = residents?.population, hh = residents?.households;
+  const n = v => Number(v).toLocaleString();
+  const why = residents == null ? "" : pop === 0
+    ? `<p class="empty">Nobody lives here (0 residents) — typically an airport, park, water or industrial land.</p>`
+    : `<p class="empty">${n(pop)} residents but only ${n(hh)} household${hh === 1 ? "" : "s"}: most people
+       here live in group quarters — dormitories, barracks, prisons or care homes — which are
+       not rooftop-solar households.</p>`;
+  document.getElementById("panel").innerHTML = `
+    <h2>Tract detail</h2>
+    <p class="geoid">${esc(p.geoid)}</p>
+    <span class="tier NONE">NOT SCORED</span>
+    <p class="empty">This tract has too few households for a reliable adoption rate
+       (the threshold is 50), so no equity gap is computed for it.</p>
+    ${why}
+    <p class="note">Search a nearby residential street, or click a coloured tract, to see a
+       scored neighbourhood.</p>`;
+}
+
+function renderPanel(p, residents) {
+  if (p.gap == null) return renderUnscored(p, residents);
   const tier = p.priority_tier || "NONE";
   const gap = p.gap;
   document.getElementById("panel").innerHTML = `
@@ -389,7 +412,7 @@ async function search(params) {
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail || r.statusText);
 
-    const {location, equity, building} = body;
+    const {location, equity, building, residents} = body;
     const geoid = location.geoid;
     // Switch counties if the address is outside the one on screen, then select its tract.
     if (geoid.slice(0, 5) !== sel.value) { sel.value = geoid.slice(0, 5); await load(); }
@@ -398,7 +421,7 @@ async function search(params) {
     layer.eachLayer(l => { if (l.feature.properties.geoid === geoid) target = l; });
     if (selected) layer.resetStyle(selected);
     selected = target;
-    renderPanel(target ? target.feature.properties : equity);
+    renderPanel(target ? target.feature.properties : equity, residents);
 
     // Pin the exact point and outline the rooftop, then fly in on satellite to show it.
     if (pin) map.removeLayer(pin);

@@ -292,7 +292,7 @@ attributable to the right service.
 ```bash
 python scripts/run_services.py            # all six, Ctrl+C stops them
 python scripts/run_services.py --list     # names and ports
-pytest -v                                 # 39 tests
+pytest -v                                 # 40 tests
 pytest -v -m "not live"                   # invariants only, no services needed
 ```
 
