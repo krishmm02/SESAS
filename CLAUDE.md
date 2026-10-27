@@ -308,6 +308,18 @@ them makes the matching test fail.
 
 `test_api_contract.py` doubles as the pre-demo smoke test. If it is green, the dashboard works.
 
+**Demo addresses — verified against the live Census geocoder.** Its address file is
+incomplete (`9000 Rockville Pike, Bethesda, MD` fails even with its ZIP), so never improvise
+an address on stage.
+
+| Address | Tract | Tier | Gap | Note |
+|---|---|---|---|---|
+| 5200 Park Heights Ave, Baltimore, MD 21215 | 24510271801 | **HIGH** | +3.16 | zero installed solar |
+| 2201 Argonne Dr, Baltimore, MD 21251 | 24510090200 | MEDIUM | +2.33 | Morgan State area |
+| 1 E Pratt St, Baltimore, MD 21202 | 24510220100 | LOW | −1.66 | Inner Harbor, over-performing |
+| 8600 Snowden River Pkwy, Columbia, MD 21045 | 24027606706 | LOW | −1.47 | Howard County contrast |
+| 1000 Hilltop Circle, Baltimore, MD 21250 | 24005492500 | *unscored* | — | UMBC — under 50 households |
+
 ### 4.4 Training the equity model
 
 ```bash
