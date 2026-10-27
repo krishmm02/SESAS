@@ -32,9 +32,11 @@ ROUTES = {
     "adoption": 8004,
     "equity": 8005,
     "geojson": 8006,
-    "yield": 8007,
+    "geocode": 8007,  # GeocodingService serves /geocode, so that is its route prefix
     "roi": 8008,
     "developability": 8009,
+    "yield": 8010,
+    "lookup": 8006,  # VisualizationService: address -> geocoding -> equity
 }
 TIMEOUT = 30
 CACHE_TTL = 300

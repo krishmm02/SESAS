@@ -1,6 +1,6 @@
 """YieldService: annual rooftop PV output per census tract.
 
-    uvicorn services.pv_yield:app --port 8007
+    uvicorn services.pv_yield:app --port 8010
 
 Physics, not ML. specific_yield_kwh_kw is kWh per year from 1 kW(dc) on a south-facing,
 20 deg roof, computed with pvlib from NASA POWER climatology (pipeline step "tract_yield").

@@ -227,11 +227,12 @@ Update this table as units land. Last synced with `origin/master` at `7464d7b`.
 | 8 | `EquityGapService` (8005) + `ml/equity_gap.py` two-stage model | Rahul | ✅ trained, stage 2 ρ=0.541 |
 | 8v | `VisualizationService` (8006) — GeoJSON, composes over HTTP | Rahul | ✅ |
 | 9 | Leaflet dashboard at `/app/` consuming `/geojson/equity` | Rahul | ✅ **midterm build complete** |
-| 10 | `YieldService` (8007) — pvlib specific yield, `pipeline/pv_yield.py` → `features.tract_yield` | Krish | ✅ ~1,270 kWh/kW/yr, ±1.5% statewide |
+| 10 | `YieldService` (8010) — pvlib specific yield, `pipeline/pv_yield.py` → `features.tract_yield` | Krish | ✅ ~1,270 kWh/kW/yr, ±1.5% statewide |
 | 11 | `DevelopabilityService` (8009) + `ml/developability.py` — grid model on `has_pv` | Krish | ✅ logistic, spatial AUC 0.80 vs substation 0.75, irradiance 0.43 |
 | 12 | `ROIService` (8008) — composes Yield + SocioEcon over REST | Krish | ✅ |
 | 13 | API Gateway (8000) — in-process TTL cache instead of Redis (cut list #1) | Krish | ✅ |
 | 14 | Full dashboard — both layers toggleable, tract ROI + cell detail panels | Krish | ✅ **endterm build complete** |
+| 15 | `GeocodingService` (8007) + `/lookup` address search, regression tests in `tests/` | Rahul | ✅ |
 
 **Units 1–9 = midterm. Units 10–14 = endterm.**
 
@@ -279,24 +280,59 @@ uvicorn services.terrain:app       --port 8002
 uvicorn services.socioecon:app     --port 8003
 uvicorn services.adoption:app      --port 8004
 uvicorn services.equity:app        --port 8005   # needs scripts/train_equity.py first
-uvicorn services.visualization:app --port 8006   # needs 8005 and 8009 running
-uvicorn services.pv_yield:app      --port 8007   # needs pipeline step tract_yield
-uvicorn services.roi:app           --port 8008   # needs 8003 and 8007 running
+uvicorn services.visualization:app --port 8006   # needs 8005, 8007 and 8009 running
+uvicorn services.geocoding:app     --port 8007   # wraps the public Census Geocoder
+uvicorn services.pv_yield:app      --port 8010   # needs pipeline step tract_yield
+uvicorn services.roi:app           --port 8008   # needs 8003 and 8010 running
 uvicorn services.developability:app --port 8009  # needs scripts/train_developability.py first
 uvicorn services.gateway:app       --port 8000   # routes /<service>/... to the ports above
 ```
 
-Or start everything at once: `python scripts/run_services.py`, then open
-`http://127.0.0.1:8000/app/`. Use 127.0.0.1, not localhost: on Windows localhost tries IPv6
-first and adds ~2 s to every service-to-service call.
+Use 127.0.0.1, not localhost: on Windows localhost tries IPv6 first and adds ~2 s to every
+service-to-service call.
 
-`VisualizationService` reads `EQUITY_SERVICE_URL` and `DEVELOPABILITY_SERVICE_URL`; `ROIService`
+`VisualizationService` reads `EQUITY_SERVICE_URL`, `GEOCODE_SERVICE_URL` and
+`DEVELOPABILITY_SERVICE_URL`; `ROIService`
 reads `YIELD_SERVICE_URL` and `SOCIOECON_SERVICE_URL`. These, and the gateway, are the services
 that call others over REST rather than reading PostGIS directly — that composition
 is the point, so keep it that way. Each one's `/health` reports upstream status so a failure is
 attributable to the right service.
 
-### 4.3 Training the equity model
+### 4.3 Running and testing
+
+```bash
+python scripts/run_services.py            # all eleven, Ctrl+C stops them
+python scripts/run_services.py --list     # names and ports
+pytest -v                                 # 36 tests
+pytest -v -m "not live"                   # invariants only, no services needed
+```
+
+Dashboard: **http://127.0.0.1:8000/app/** (through the gateway; the ROI panel needs it).
+VisualizationService still serves the same page at 8006/app/ without ROI.
+
+`tests/` holds integration tests, not unit tests, and that is deliberate. The services are
+thin enough that mocking the database would test SQLAlchemy rather than this project, and
+three of the four real bugs this project shipped were semantic — a ranking that inverted, an
+expectation that leaked location — in code that was logically correct. **Every test in
+`test_model_invariants.py` encodes a bug that actually shipped**, and its failure message
+names what broke. Verified by mutation: corrupting the scores in the way each bug corrupted
+them makes the matching test fail.
+
+`test_api_contract.py` doubles as the pre-demo smoke test. If it is green, the dashboard works.
+
+**Demo addresses — verified against the live Census geocoder.** Its address file is
+incomplete (`9000 Rockville Pike, Bethesda, MD` fails even with its ZIP), so never improvise
+an address on stage.
+
+| Address | Tract | Tier | Gap | Note |
+|---|---|---|---|---|
+| 5200 Park Heights Ave, Baltimore, MD 21215 | 24510271801 | **HIGH** | +3.16 | zero installed solar |
+| 2201 Argonne Dr, Baltimore, MD 21251 | 24510090200 | MEDIUM | +2.33 | Morgan State area |
+| 1 E Pratt St, Baltimore, MD 21202 | 24510220100 | LOW | −1.66 | Inner Harbor, over-performing |
+| 8600 Snowden River Pkwy, Columbia, MD 21045 | 24027606706 | LOW | −1.47 | Howard County contrast |
+| 1000 Hilltop Circle, Baltimore, MD 21250 | 24005492500 | *unscored* | — | UMBC — under 50 households |
+
+### 4.4 Training the equity model
 
 ```bash
 python scripts/run_pipeline.py      # must have produced features.tract_features

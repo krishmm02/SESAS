@@ -26,6 +26,14 @@
          border-radius:5px;background:#fff;color:var(--ink);min-width:190px}
   label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);
         margin-right:7px;font-weight:600}
+  #search{display:flex;align-items:center;gap:0}
+  #addr{font-family:var(--font);font-size:13px;padding:5px 9px;border:1px solid var(--line);
+        border-radius:5px 0 0 5px;width:236px;color:var(--ink)}
+  #addr:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  #search button{font-family:var(--font);font-size:12px;font-weight:600;padding:6px 12px;
+    border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;
+    border-radius:0 5px 5px 0}
+  #search button:disabled{opacity:.55;cursor:default}
   #tiers{display:flex;gap:7px;margin-left:auto;flex-wrap:wrap}
   .chip{font-size:11px;font-family:var(--mono);padding:4px 9px;border-radius:11px;
         border:1px solid var(--line);background:#fff;white-space:nowrap}
@@ -85,6 +93,8 @@
 <header>
   <h1>Solar Equity &amp; Siting <span>· Maryland</span></h1>
   <div><label for="county">County</label><select id="county"></select></div>
+  <form id="search"><label for="addr">Address</label><input id="addr" type="text"
+    placeholder="5200 Park Heights Ave, Baltimore MD" autocomplete="off"><button>Find</button></form>
   <div class="layers">
     <label><input type="checkbox" id="show-equity" checked> Rooftop equity (tracts)</label>
     <label><input type="checkbox" id="show-grid"> Utility-scale siting (1 km)</label>
@@ -308,7 +318,7 @@ async function loadGrid() {
     const gj = await r.json();
     if (ticket !== gridTicket) return;
     gridLayer = L.geoJSON(gj, {
-      style: f => ({fillColor: GRID_COLORS[f.properties.tier] || "#eeeeee", fillOpacity: 0.8,
+      style: f => ({fillColor: GRID_COLORS[f.properties.tier] || "#eeeeee", fillOpacity: showEquity.checked ? 0.45 : 0.8,  // let tracts show through
                     weight: f.properties.has_pv ? 2 : 0.3,
                     color: f.properties.has_pv ? "#15202b" : "#ffffff"}),
       onEachFeature: (f, lyr) => {
@@ -350,7 +360,7 @@ async function loadEquity() {
           click: e => {
             if (selected) layer.resetStyle(selected);
             selected = e.target;
-            e.target.setStyle({weight:2.5, color:"#15202b"});
+            e.target.setStyle({weight:2.5, color:"#15202b"}); e.target.bringToFront();
             renderPanel(f.properties);
           }
         });
@@ -373,8 +383,62 @@ async function loadEquity() {
 }
 
 sel.addEventListener("change", load);
-showEquity.addEventListener("change", () => { renderLegend(); loadEquity(); });
+showEquity.addEventListener("change", () => {
+  renderLegend(); loadEquity();
+  if (gridLayer) gridLayer.resetStyle();  // re-applies opacity for the new layer combination
+});
 showGrid.addEventListener("change", () => { renderLegend(); loadGrid(); });
+
+// Address search. /lookup chains GeocodingService then EquityGapService, so one call
+// takes a street address all the way to a scored tract.
+const form = document.getElementById("search");
+const addr = document.getElementById("addr");
+
+function flashPanel(html) {
+  document.getElementById("panel").innerHTML = `<h2>Tract detail</h2>${html}`;
+}
+
+form.addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const q = addr.value.trim();
+  if (!q) return;
+  const btn = form.querySelector("button");
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const r = await fetch(`../lookup?address=${encodeURIComponent(q)}`);
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+
+    const geoid = body.location.geoid;
+    // Switch counties if the address is outside the one on screen, then select its tract.
+    const county = geoid.slice(0, 5);
+    // The result is a tract, so the tract layer must be on to select it.
+    const turnOn = !showEquity.checked;
+    if (turnOn) { showEquity.checked = true; renderLegend(); }
+    if (county !== sel.value) { sel.value = county; await load(); }
+    else if (turnOn) await loadEquity();
+
+    let target = null;
+    layer.eachLayer(l => { if (l.feature.properties.geoid === geoid) target = l; });
+    if (target) {
+      if (selected) layer.resetStyle(selected);
+      selected = target;
+      target.setStyle({weight:2.5, color:"#15202b"}); target.bringToFront();
+      map.fitBounds(target.getBounds(), {padding:[90,90], maxZoom:14, animate:false});
+      renderPanel(target.feature.properties);
+    } else {
+      renderPanel(body.equity);
+    }
+    const p = document.getElementById("panel");
+    p.insertAdjacentHTML("afterbegin",
+      `<p class="geoid" style="margin-bottom:10px">matched: ${body.location.matched_address}</p>`);
+  } catch (e) {
+    flashPanel(`<p class="empty" style="color:var(--hi)">${e.message}</p>`);
+  } finally {
+    btn.disabled = false; btn.textContent = "Find";
+  }
+});
+
 load();
 </script>
 </body>

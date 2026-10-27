@@ -29,3 +29,5 @@ dependencies:
   - fastapi
   - uvicorn
   - python-dotenv
+  # tests
+  - pytest

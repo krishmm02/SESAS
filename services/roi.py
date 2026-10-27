@@ -3,7 +3,7 @@
     uvicorn services.roi:app --port 8008
 
 Composes two services over REST rather than reading PostGIS: annual kWh from YieldService
-(8007) and the tract's average household electricity bill from SocioEconService (8003,
+(8010) and the tract's average household electricity bill from SocioEconService (8003,
 NREL LEAD). Every default below can be overridden per request.
 
 Without ?kw=, the system is sized to cover the tract's average household use
@@ -29,7 +29,7 @@ from services.common import COUNTY, GEOID
 app = FastAPI(title="ROIService")
 
 # 127.0.0.1, not localhost: on Windows "localhost" tries IPv6 first and stalls ~2 s per call.
-YIELD_URL = os.getenv("YIELD_SERVICE_URL", "http://127.0.0.1:8007")
+YIELD_URL = os.getenv("YIELD_SERVICE_URL", "http://127.0.0.1:8010")
 SOCIOECON_URL = os.getenv("SOCIOECON_SERVICE_URL", "http://127.0.0.1:8003")
 TIMEOUT = 20
 LIFETIME_YEARS = 25
